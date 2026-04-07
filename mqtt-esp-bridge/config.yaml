@@ -1,0 +1,39 @@
+name: "MQTT Bridge for SSD&Gang4&ESP"
+version: "1.0.6"
+slug: "mqtt-esp-bridge"
+description: "Reads SMART and sends it to MQTT, also work for gang4 multikey and as esp-server-bridge"
+image: "ghcr.io/aculeasis/mqtt-esp-bridge-{arch}"
+url: "https://github.com/Aculeasis/ha_addons/tree/main/mqtt-esp-bridge"
+arch:
+  - aarch64
+startup: "application"
+boot: "auto"
+init: false
+full_access: true
+apparmor: true
+udev: true
+
+privileged:
+  - SYS_ADMIN
+  - SYS_RAWIO
+  - DAC_READ_SEARCH
+
+ports:
+  8900/tcp: 8900
+  8801/tcp: 8801
+
+services:
+  - "mqtt:need"
+
+options:
+  mqtt_auto: true
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_user: ""
+  mqtt_password: ""
+schema:
+  mqtt_auto: bool
+  mqtt_port: port
+  mqtt_host: str
+  mqtt_user: str
+  mqtt_password: password
