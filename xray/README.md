@@ -1,4 +1,4 @@
-# HA Xray Runner
+# Xray Runner
 
 A Home Assistant add-on that launches an [Xray-core](https://github.com/XTLS/Xray-core) instance based on a standard `config.json` placed in the add-on's configuration directory.
 
@@ -10,7 +10,7 @@ A Home Assistant add-on that launches an [Xray-core](https://github.com/XTLS/Xra
    ```
    https://github.com/Aculeasis/ha_addons
    ```
-4. Find **HA Xray Runner** in the store and click **Install**.
+4. Find **Xray Runner** in the store and click **Install**.
 
 ## Configuration
 

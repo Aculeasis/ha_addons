@@ -1,4 +1,4 @@
-# HA Shadowsocks & GOST Runner
+# Shadowsocks & GOST Runner
 
 A Home Assistant add-on that automatically discovers and launches any number of [shadowsocks-libev](https://github.com/shadowsocks/shadowsocks-libev) or [GOST](https://gost.run/) instances based on standard config files placed in the add-on's configuration directory.
 
@@ -17,7 +17,7 @@ A Home Assistant add-on that automatically discovers and launches any number of 
    ```
    https://github.com/Aculeasis/ha_addons
    ```
-4. Find **HA Shadowsocks & GOST Runner** in the store and click **Install**.
+4. Find **Shadowsocks & GOST Runner** in the store and click **Install**.
 
 ## Configuration
 
