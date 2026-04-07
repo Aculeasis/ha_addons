@@ -1,0 +1,51 @@
+#include <tunables/global>
+
+profile gost-ss flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  # Allow full network access
+  network,
+
+  # Required capabilities for s6-overlay / basic container operation
+  capability chown,
+  capability setuid,
+  capability setgid,
+  capability dac_override,
+  capability kill,
+  capability net_bind_service,
+
+  # Explicitly deny dangerous capabilities (least privilege principle)
+  deny capability sys_admin,
+  deny capability net_admin,
+  deny capability sys_ptrace,
+  deny capability sys_module,
+  deny capability sys_boot,
+  deny capability sys_chroot,
+  deny capability sys_rawio,
+  deny capability sys_time,
+  deny capability mknod,
+  deny capability audit_write,
+  deny capability audit_control,
+  deny capability mac_override,
+  deny capability mac_admin,
+
+  # Deny mount/umount operations inside the container
+  deny mount,
+  deny remount,
+  deny umount,
+
+  # Deny ptrace
+  deny ptrace,
+
+  # Allow regular file actions inside the container sandbox
+  file,
+
+  # Prevent modification of host parameters exposed via proc/sys
+  deny /proc/sys/** w,
+  deny /sys/** w,
+
+  # Prevent access to docker socket if somehow exposed
+  deny /var/run/docker.sock rw,
+}

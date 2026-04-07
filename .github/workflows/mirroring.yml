@@ -1,0 +1,42 @@
+name: Mirror to GitLab
+
+on: [push]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  to_gitlab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Manual Mirror to GitLab
+        env:
+          GIT_SSH_PRIVATE_KEY: ${{ secrets.GITLAB_SSH_PRIVATE_KEY }}
+          GIT_SSH_KNOWN_HOSTS: ${{ vars.GITLAB_SSH_KNOWN_HOSTS }}
+          REMOTE_URL: ssh://git@gitlab.com/${{ github.repository }}.git
+        run: |
+          echo "Setting up SSH environment..."
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          echo "Writing private key to ~/.ssh/id_rsa..."
+          echo "$GIT_SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          echo "Writing known_hosts to ~/.ssh/known_hosts..."
+          echo "$GIT_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          echo "Configuring Git to use specific SSH settings..."
+          git config --global core.sshCommand 'ssh -i ~/.ssh/id_rsa -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o StrictHostKeyChecking=yes'
+
+          echo "Configuring remote 'mirror'..."
+          git remote remove mirror || true
+          git remote add mirror "$REMOTE_URL"
+
+          echo "Pushing all refs and tags to the mirror..."
+          git push --tags --force --prune mirror 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'
+
