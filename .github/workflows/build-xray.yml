@@ -1,4 +1,4 @@
-name: Publish HA Add-on: xray
+name: 'Publish HA Add-on: xray'
 
 on:
   workflow_dispatch:

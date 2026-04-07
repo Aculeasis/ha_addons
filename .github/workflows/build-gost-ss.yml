@@ -1,4 +1,4 @@
-name: Publish HA Add-on: gost-ss
+name: 'Publish HA Add-on: gost-ss'
 
 on:
   workflow_dispatch:

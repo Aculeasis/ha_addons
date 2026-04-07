@@ -1,4 +1,4 @@
-name: Publish HA Add-on: remote-smart
+name: 'Publish HA Add-on: remote-smart'
 
 on:
   workflow_dispatch:
