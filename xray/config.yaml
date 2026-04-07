@@ -1,5 +1,5 @@
 name: "Xray Runner"
-version: "1.0.1"
+version: "1.0.2"
 slug: "xray"
 description: "Run Xray-core (XTLS)"
 url: "https://github.com/Aculeasis/ha_addons/tree/main/xray"
