@@ -1,5 +1,5 @@
 name: "Privoxy"
-version: "1.0.2"
+version: "1.0.3"
 slug: "privoxy"
 description: "Run Privoxy non-caching web proxy"
 url: "https://github.com/Aculeasis/ha_addons/tree/main/privoxy"
