@@ -1,0 +1,17 @@
+name: "Privoxy"
+version: "1.0.0"
+slug: "privoxy"
+description: "Run Privoxy non-caching web proxy"
+url: "https://github.com/Aculeasis/ha_addons/tree/main/privoxy"
+image: "ghcr.io/aculeasis/privoxy-{arch}"
+arch:
+  - aarch64
+  - amd64
+startup: "services"
+init: false
+
+map:
+  - type: addon_config
+
+ports:
+  8118/tcp: 8118
