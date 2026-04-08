@@ -52,7 +52,7 @@ jobs:
       - name: Build and push Docker image
         if: github.event_name != 'push' || steps.version_check.outputs.changed == 'true'
         id: build-push
-        uses: home-assistant/builder@2025.03.0
+        uses: home-assistant/builder@2026.02.1
         with:
           args: |
             --all \
