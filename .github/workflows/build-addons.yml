@@ -1,0 +1,102 @@
+name: 'Publish HA Add-ons'
+
+on:
+  workflow_dispatch:
+    inputs:
+      addon:
+        description: 'Add-on to build (leave empty for all)'
+        required: false
+        default: ''
+      tag:
+        description: 'Image tag (e.g., latest, v1.0.0)'
+        required: true
+        default: 'latest'
+  push:
+    branches:
+      - main
+    paths:
+      - '*/config.yaml'
+
+jobs:
+  detect-addons:
+    runs-on: ubuntu-latest
+    outputs:
+      addons: ${{ steps.detect.outputs.addons }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect add-ons to build
+        id: detect
+        run: |
+          # Find all directories with config.yaml and Dockerfile, excluding hidden directories
+          ADDONS=$(find . -maxdepth 2 -name "config.yaml" -type f | xargs -I{} dirname {} | sed 's|^\./||' | while read dir; do
+            if [ -f "$dir/Dockerfile" ] && [[ ! "$dir" =~ ^\. ]]; then
+              echo "$dir"
+            fi
+          done | sort)
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger - build specific addon or all
+            if [ -n "${{ inputs.addon }}" ]; then
+              ADDONS="${{ inputs.addon }}"
+            fi
+          else
+            # Push trigger - only build addons where config.yaml changed
+            CHANGED_ADDONS=""
+            for addon in $ADDONS; do
+              if git diff ${{ github.event.before }} ${{ github.event.after }} -- "$addon/config.yaml" 2>/dev/null | grep -q '^+version:'; then
+                CHANGED_ADDONS="$CHANGED_ADDONS $addon"
+              fi
+            done
+            ADDONS=$(echo $CHANGED_ADDONS | tr ' ' '\n' | grep -v '^$' | tr '\n' ' ')
+          fi
+
+          # Convert to JSON array
+          if [ -z "$ADDONS" ]; then
+            echo "addons=[]" >> "$GITHUB_OUTPUT"
+          else
+            JSON_ARRAY=$(echo "$ADDONS" | tr ' ' '\n' | grep -v '^$' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            echo "addons=$JSON_ARRAY" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-push:
+    needs: detect-addons
+    if: needs.detect-addons.outputs.addons != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        addon: ${{ fromJson(needs.detect-addons.outputs.addons) }}
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read architectures from config
+        id: arch
+        run: |
+          ARCH_FLAGS=$(yq '.arch[]' ${{ matrix.addon }}/config.yaml | sed 's/^/--/' | tr '\n' ' ')
+          echo "flags=$ARCH_FLAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: home-assistant/builder@2026.02.1
+        with:
+          args: |
+            ${{ steps.arch.outputs.flags }}\
+            --target ${{ matrix.addon }} \
+            --docker-hub ghcr.io/aculeasis
