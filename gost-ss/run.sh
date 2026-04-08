@@ -17,6 +17,13 @@ shutdown_processes() {
 # Trap SIGTERM and SIGINT for graceful shutdown
 trap "shutdown_processes" SIGTERM SIGHUP SIGINT
 
+DELAY=$(bashio::config 'delay' || echo 0)
+if [ "$DELAY" -gt 0 ] 2>/dev/null; then
+    bashio::log.info "Delaying startup by ${DELAY} seconds..."
+    sleep "$DELAY" &
+    wait $!
+fi
+
 bashio::log.info "Starting shadowsocks instances..."
 
 # Iterate through all .json files in /config

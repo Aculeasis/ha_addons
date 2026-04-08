@@ -1,5 +1,5 @@
 name: "Shadowsocks & GOST Runner"
-version: "1.1.3"
+version: "1.1.4"
 slug: "gost-ss"
 description: "Run any type and count of Shadowsocks and GOST instances"
 url: "https://github.com/Aculeasis/ha_addons/tree/main/gost-ss"
@@ -13,6 +13,11 @@ init: false
 map:
   - type: addon_config
     read_only: true
+
+options:
+  delay: 0
+schema:
+  delay: "int(0,)"
 
 ports:
   4999/tcp: null
