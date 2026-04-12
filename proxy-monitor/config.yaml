@@ -1,5 +1,5 @@
 name: "Proxy Monitor"
-version: "1.0.2"
+version: "1.0.3"
 slug: "proxy-monitor"
 description: "Real-time SOCKS5 proxy monitoring dashboard with TCP and UDP checks"
 url: "https://github.com/Aculeasis/ha_addons/tree/main/proxy-monitor"

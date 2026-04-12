@@ -1,0 +1,228 @@
+/* ─── Buttons ─────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: none;
+  font: 500 13px 'Inter', sans-serif;
+  cursor: pointer;
+  transition: var(--t);
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+}
+
+.btn-primary:hover {
+  opacity: 0.85;
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: var(--glass);
+  border: 1px solid var(--border);
+  color: var(--text2);
+}
+
+.btn-ghost:hover {
+  background: var(--glass-hover);
+  color: var(--text);
+  border-color: var(--border-accent);
+}
+
+.btn-danger {
+  background: rgba(245, 74, 74, 0.15);
+  border: 1px solid rgba(245, 74, 74, 0.3);
+  color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: rgba(245, 74, 74, 0.25);
+}
+
+.btn-sm {
+  padding: 5px 11px;
+  font-size: 12px;
+  border-radius: var(--radius-xs);
+}
+
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  min-width: 32px;
+  flex-shrink: 0;
+}
+
+
+/* ─── Dropdowns ───────────────────────────────────────────────────── */
+.theme-switcher {
+  position: relative;
+  display: flex;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  background: rgba(var(--bg2-rgb), 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  min-width: 140px;
+  padding: 6px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  transform: translateY(10px) scale(0.95);
+  visibility: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dropdown-menu.show {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+}
+
+.dropdown-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  color: var(--text2);
+  font: 500 13px 'Inter', sans-serif;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: var(--t);
+  text-align: left;
+}
+
+.dropdown-menu button span {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.dropdown-menu button:hover {
+  background: var(--glass-hover);
+  color: var(--text);
+}
+
+.dropdown-menu button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.dropdown-menu button.active span {
+  opacity: 1;
+}
+
+
+/* ─── No data state ───────────────────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--text3);
+  font-size: 15px;
+}
+
+.empty-state svg {
+  display: block;
+  margin: 0 auto 16px;
+  opacity: 0.3;
+}
+
+
+/* ─── Toast ───────────────────────────────────────────────────────── */
+#toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+  color: var(--text);
+  animation: toast-in 0.25s ease;
+  max-width: 340px;
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateX(60px);
+    opacity: 0;
+  }
+
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.toast.success {
+  border-color: rgba(18, 216, 138, 0.4);
+}
+
+.toast.error {
+  border-color: rgba(245, 74, 74, 0.4);
+}
+
+.toast.info {
+  border-color: var(--border-accent);
+}
+
+.toast-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.toast-fade {
+  animation: toast-out 0.3s ease forwards;
+}
+
+@keyframes toast-out {
+  to {
+    transform: translateX(60px);
+    opacity: 0;
+  }
+}
+
+
+/* ─── Spinner ─────────────────────────────────────────────────────── */
+.spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(91, 138, 245, 0.2);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

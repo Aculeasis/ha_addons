@@ -2,6 +2,8 @@
 
 Real-time SOCKS5 proxy monitoring dashboard with TCP and UDP checks.
 
+![Proxy Monitor Dashboard](screenshot.jpg)
+
 ## Features
 
 - **TCP & UDP checks** – Full SOCKS5 support

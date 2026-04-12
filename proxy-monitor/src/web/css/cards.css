@@ -1,0 +1,314 @@
+/* ─── Proxy grid ──────────────────────────────────────────────────── */
+.proxy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+
+/* ─── Proxy card ──────────────────────────────────────────────────── */
+.proxy-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  transition: all var(--t);
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+:root[data-theme="dark"] .proxy-card {
+  background: var(--glass);
+}
+
+.proxy-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(91, 138, 245, 0.03), transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--t);
+}
+
+.proxy-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow);
+  border-color: var(--border-accent);
+}
+
+.proxy-card:hover::before {
+  opacity: 1;
+}
+
+.proxy-card.alive-card {
+  border-left: 3px solid var(--success);
+}
+
+.proxy-card.dead-card {
+  border-left: 3px solid var(--danger);
+}
+
+.proxy-card.partial-card {
+  border-left: 3px solid var(--warning);
+}
+
+/* card header */
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.status-col {
+  padding-top: 3px;
+}
+
+.status-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text3);
+}
+
+.status-dot.alive {
+  background: var(--success);
+  animation: pulse-card 2.5s infinite;
+}
+
+.status-dot.dead {
+  background: var(--danger);
+}
+
+.status-dot.partial {
+  background: var(--warning);
+}
+
+@keyframes pulse-card {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(18, 216, 138, 0.4);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(18, 216, 138, 0);
+  }
+}
+
+.card-info {
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 1px;
+}
+
+.card-addr {
+  font-size: 12px;
+  color: var(--text3);
+  font-family: 'Courier New', monospace;
+  word-break: break-all;
+}
+
+.card-ip {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* latency column – top-right of card header */
+.card-lat {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+
+.lat-entry {
+  display: contents;
+}
+
+.lat-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text3);
+  letter-spacing: 0.5px;
+  justify-self: end;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(91, 138, 245, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(91, 138, 245, 0.2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+
+/* stat rows */
+.card-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+  flex: 1;
+  align-content: flex-start;
+  min-height: 40px;
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text3);
+  width: 28px;
+  flex-shrink: 0;
+}
+
+.stat-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* bar + latency badge on the same line */
+.stat-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 3px;
+}
+
+.stat-bar-row .stat-bar-bg {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.stat-bar-bg {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bar-bg);
+  margin-bottom: 2px;
+  overflow: hidden;
+}
+
+.stat-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+.bar-alive {
+  background: linear-gradient(90deg, var(--success), rgba(18, 216, 138, 0.5));
+}
+
+.bar-dead {
+  background: var(--danger);
+}
+
+.stat-nums {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.stat-nums .s {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.stat-nums .f {
+  color: var(--danger);
+}
+
+.stat-latency {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-align: center;
+  min-width: 44px;
+}
+
+.lat-good {
+  color: var(--success);
+  background: rgba(18, 216, 138, 0.1);
+}
+
+.lat-mid {
+  color: var(--warning);
+  background: rgba(245, 168, 64, 0.1);
+}
+
+.lat-bad {
+  color: var(--danger);
+  background: rgba(245, 74, 74, 0.1);
+}
+
+.lat-none {
+  color: var(--text3);
+}
+
+/* Hoverable latency badge */
+.stat-latency[data-last]:hover {
+  filter: brightness(1.3);
+  transition: filter 0.15s ease;
+}
+
+/* sparkline */
+.sparkline-wrap {
+  height: 28px;
+  margin: 4px 0 2px;
+  position: relative;
+}
+
+.sparkline-wrap svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* card footer – always at bottom */
+.card-footer {
+  display: none;
+}
