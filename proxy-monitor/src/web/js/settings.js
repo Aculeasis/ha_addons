@@ -115,6 +115,17 @@ function buildSettingsHtml(cfg) {
           <option value="12h" ${s.time_format === '12h' ? 'selected' : ''}>12h</option>
         </select>
       </div>
+      <div class="form-group">
+        <label>Log Level</label>
+        <select id="cfg-log-level">
+          <option value="DEBUG" ${s.log_level === 'DEBUG' ? 'selected' : ''}>DEBUG</option>
+          <option value="INFO" ${s.log_level === 'INFO' || !s.log_level ? 'selected' : ''}>INFO</option>
+          <option value="WARNING" ${s.log_level === 'WARNING' ? 'selected' : ''}>WARNING</option>
+          <option value="ERROR" ${s.log_level === 'ERROR' ? 'selected' : ''}>ERROR</option>
+          <option value="CRITICAL" ${s.log_level === 'CRITICAL' ? 'selected' : ''}>CRITICAL</option>
+        </select>
+      </div>
+
       <div class="form-group" style="grid-column:1/-1">
         <label>Trusted IPs & Subnets (one per line, CIDR allowed)</label>
         <textarea id="cfg-trusted-ips" rows="3" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text);padding:8px 12px;font:14px Inter,sans-serif;resize:vertical;outline:none;transition:border-color var(--t)" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">${(s.trusted_ips || []).join('\n')}</textarea>
@@ -164,6 +175,7 @@ function collectConfig() {
     whitelist: (document.getElementById('cfg-whitelist-ips')?.value || '')
       .split('\n').map(s => s.trim()).filter(Boolean),
     time_format: document.getElementById('cfg-time-format')?.value || '24h',
+    log_level: document.getElementById('cfg-log-level')?.value || 'INFO',
   };
   cfg.monitoring = {
     ...cfg.monitoring,

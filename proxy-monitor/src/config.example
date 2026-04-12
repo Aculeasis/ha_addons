@@ -3,6 +3,7 @@ server:
   port: 8099
   username: "admin"
   password: ""
+  log_level: "INFO"
   trusted_ips:
     - "172.30.32.2"
   whitelist:

@@ -26,7 +26,7 @@ class Storage:
             cur = await db.execute("PRAGMA table_info(proxy_checks)")
             cols = [row[1] for row in await cur.fetchall()]
             if cols and "external_ip" in cols:
-                logger.info("Outdated schema detected. Dropping old proxy_checks table...")
+                logger.warning("Outdated schema detected. Dropping old proxy_checks table...")
                 await db.execute("DROP TABLE proxy_checks")
                 await db.commit()
 
@@ -64,7 +64,7 @@ class Storage:
             cur = await db.execute("SELECT id, proxy_id FROM proxies")
             for pid, p_str in await cur.fetchall():
                 self._proxy_cache[p_str] = pid
-        logger.info("Storage initialised: %s", self.db_path)
+        logger.warning("Storage initialised: %s", self.db_path)
 
     async def _get_proxy_fk(self, db: aiosqlite.Connection, proxy_id: str) -> int:
         if proxy_id in self._proxy_cache:
@@ -323,7 +323,7 @@ class Storage:
             async with aiosqlite.connect(self.db_path, isolation_level=None) as db:
                 await db.execute("VACUUM")
                 
-            logger.info(
+            logger.warning(
                 "Cleaned %d old records (retention=%dd) and vacuumed database", 
                 deleted, retention_days
             )

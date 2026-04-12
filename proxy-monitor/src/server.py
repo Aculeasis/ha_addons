@@ -41,11 +41,31 @@ from storage import Storage
 # ------------------------------------------------------------------ #
 #  Logging                                                             #
 # ------------------------------------------------------------------ #
+LOG_LEVELS = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def apply_logging_level() -> None:
+    """Updates the logging level for the root logger and uvicorn loggers."""
+    level_name = config.get("server", {}).get("log_level", "INFO").upper()
+    level = LOG_LEVELS.get(level_name, logging.INFO)
+    logging.getLogger().setLevel(level)
+    # Update uvicorn loggers to match
+    for name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
+        logging.getLogger(name).setLevel(level)
+    logger.info("Logging level set to %s", level_name)
+
 
 # ------------------------------------------------------------------ #
 #  Global state & Args                                                 #
@@ -330,6 +350,7 @@ async def lifespan(app: FastAPI):
     global config, storage, checker, check_task, cleanup_task
 
     config = load_config()
+    apply_logging_level()
     db_path = config.get("storage", {}).get("db_path", "proxy_data.db")
     storage = Storage(db_path)
     await storage.init()
@@ -339,7 +360,7 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(_run_cleanup())
 
     n = len(config.get("proxies", []))
-    logger.info("Proxy Monitor started - %d prox%s configured.", n, "ies" if n != 1 else "y")
+    logger.warning("Proxy Monitor started - %d prox%s configured.", n, "ies" if n != 1 else "y")
 
     yield
 
@@ -467,6 +488,7 @@ async def api_save_config(
     body: Dict = await request.json()
     save_config(body)
     config = body
+    apply_logging_level()
     checker = ProxyChecker(config)
 
     # Restart check loop with new settings
