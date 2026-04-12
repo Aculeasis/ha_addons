@@ -16,6 +16,7 @@ const state = {
   editingProxyIndex: null,
   pendingConfig: null,
   dbSizeFormatted: null,
+  safeguard: false,
   theme: localStorage.getItem('pm_theme') || 'system',
   privacyMode: localStorage.getItem('pm_privacy') === 'true',
 };

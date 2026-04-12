@@ -5,6 +5,7 @@ async function init() {
   // Detect if auth is required
   try {
     const info = await fetch('api/auth-info').then(r => r.json());
+    state.safeguard = !!info.safeguard;
     if (info.auth_required && !state.sessionToken) {
       showLogin();
       return;

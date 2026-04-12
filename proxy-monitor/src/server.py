@@ -16,6 +16,7 @@ import asyncio
 import ipaddress
 import json
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -400,14 +401,17 @@ class LoginBody(BaseModel):
 async def auth_info(request: Request) -> Dict:
     srv = config.get("server", {})
     client_ip = request.client.host if request.client else ""
+    safeguard = os.getenv("HASSIO_SAFEGUARD") == "true" or os.getenv("HASSIO_SAFEGUARD") == "1"
     if _is_trusted_ip(client_ip):
         return {
             "auth_required": False,
             "username": None,
+            "safeguard": safeguard,
         }
     return {
         "auth_required": _auth_required(),
         "username": srv.get("username", "admin") if _auth_required() else None,
+        "safeguard": safeguard,
     }
 
 

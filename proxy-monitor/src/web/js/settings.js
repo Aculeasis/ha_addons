@@ -94,19 +94,19 @@ function buildSettingsHtml(cfg) {
     <div class="form-grid">
       <div class="form-group">
         <label>Host</label>
-        <input type="text" id="cfg-host" value="${esc(s.host || '0.0.0.0')}" />
+        <input type="text" id="cfg-host" value="${esc(s.host || '0.0.0.0')}" ${state.safeguard ? 'disabled' : ''} />
       </div>
       <div class="form-group">
         <label>Port</label>
-        <input type="number" id="cfg-port" value="${s.port || 8080}" min="1" max="65535" />
+        <input type="number" id="cfg-port" value="${s.port || 8080}" min="1" max="65535" ${state.safeguard ? 'disabled' : ''} />
       </div>
       <div class="form-group">
         <label>Auth Username</label>
-        <input type="text" id="cfg-username" value="${esc(s.username || 'admin')}" placeholder="admin" />
+        <input type="text" id="cfg-username" value="${esc(s.username || 'admin')}" placeholder="admin" ${state.safeguard ? 'disabled' : ''} />
       </div>
       <div class="form-group">
         <label>Auth Password (empty = disabled)</label>
-        <input type="password" id="cfg-password" value="${esc(s.password || '')}" placeholder="leave empty to disable" />
+        <input type="password" id="cfg-password" value="${esc(s.password || '')}" placeholder="leave empty to disable" ${state.safeguard ? 'disabled' : ''} />
       </div>
       <div class="form-group">
         <label>Time Format</label>
@@ -128,11 +128,11 @@ function buildSettingsHtml(cfg) {
 
       <div class="form-group" style="grid-column:1/-1">
         <label>Trusted IPs & Subnets (one per line, CIDR allowed)</label>
-        <textarea id="cfg-trusted-ips" rows="3" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text);padding:8px 12px;font:14px Inter,sans-serif;resize:vertical;outline:none;transition:border-color var(--t)" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">${(s.trusted_ips || []).join('\n')}</textarea>
+        <textarea id="cfg-trusted-ips" rows="3" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text);padding:8px 12px;font:14px Inter,sans-serif;resize:vertical;outline:none;transition:border-color var(--t)" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" ${state.safeguard ? 'disabled' : ''}>${(s.trusted_ips || []).join('\n')}</textarea>
       </div>
       <div class="form-group" style="grid-column:1/-1">
         <label>Whitelist IPs & Subnets (one per line, CIDR allowed, empty = disabled)</label>
-        <textarea id="cfg-whitelist-ips" rows="3" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text);padding:8px 12px;font:14px Inter,sans-serif;resize:vertical;outline:none;transition:border-color var(--t)" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">${(s.whitelist || []).join('\n')}</textarea>
+        <textarea id="cfg-whitelist-ips" rows="3" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text);padding:8px 12px;font:14px Inter,sans-serif;resize:vertical;outline:none;transition:border-color var(--t)" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" ${state.safeguard ? 'disabled' : ''}>${(s.whitelist || []).join('\n')}</textarea>
       </div>
     </div>
   </div>
@@ -156,7 +156,7 @@ function buildSettingsHtml(cfg) {
           <span>DB path</span>
           ${state.dbSizeFormatted ? `<span style="font-size:11px; opacity:0.6; font-weight:normal;">${state.dbSizeFormatted}</span>` : ''}
         </label>
-        <input type="text" id="cfg-db-path" value="${esc(st.db_path || 'proxy_data.db')}" />
+        <input type="text" id="cfg-db-path" value="${esc(st.db_path || 'proxy_data.db')}" ${state.safeguard ? 'disabled' : ''} />
       </div>
     </div>
   </div>`;

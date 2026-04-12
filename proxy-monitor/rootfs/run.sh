@@ -8,6 +8,8 @@ if ! bashio::fs.file_exists "${CONFIG_FILE}"; then
     cp /usr/src/app/config.example "${CONFIG_FILE}"
 fi
 
+export HASSIO_SAFEGUARD="true"
+
 bashio::log.info "Starting Proxy Monitor..."
 cd "${CONFIG_DIR}" || exit 1
 exec python3 /usr/src/app/server.py --config "${CONFIG_FILE}"
