@@ -3,6 +3,7 @@ version: "1.0.0"
 slug: "proxy-monitor"
 description: "Real-time SOCKS5 proxy monitoring dashboard with TCP and UDP checks"
 url: "https://github.com/Aculeasis/ha_addons/tree/main/proxy-monitor"
+image: "ghcr.io/aculeasis/proxy-monitor-{arch}"
 arch:
   - aarch64
   - amd64
