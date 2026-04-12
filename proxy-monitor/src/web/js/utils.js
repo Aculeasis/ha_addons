@@ -6,7 +6,7 @@ function toast(type, text, ms = 3500) {
   const tc = document.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.innerHTML = `<span class="toast-icon">${ICONS[type] || '•'}</span><span>${text}</span>`;
+  el.innerHTML = `<span class="toast-icon">${ICONS[type] || '•'}</span><span>${esc(text)}</span>`;
   tc.appendChild(el);
   setTimeout(() => {
     el.classList.add('toast-fade');
