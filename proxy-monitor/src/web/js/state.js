@@ -15,6 +15,7 @@ const state = {
   detailChart: null,
   editingProxyIndex: null,
   pendingConfig: null,
+  dbSizeFormatted: null,
   theme: localStorage.getItem('pm_theme') || 'system',
   privacyMode: localStorage.getItem('pm_privacy') === 'true',
 };

@@ -5,9 +5,15 @@ async function openSettings() {
   document.getElementById('settings-modal').classList.remove('hidden');
   document.getElementById('settings-body').innerHTML =
     '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
-  const cfg = await apiFetch('api/config');
+  
+  const [cfg, dbInfo] = await Promise.all([
+    apiFetch('api/config'),
+    apiFetch('api/db-size')
+  ]);
+
   if (!cfg) return;
   state.pendingConfig = JSON.parse(JSON.stringify(cfg));
+  state.dbSizeFormatted = dbInfo?.formatted || null;
   document.getElementById('settings-body').innerHTML = buildSettingsHtml(state.pendingConfig);
 }
 
@@ -135,7 +141,10 @@ function buildSettingsHtml(cfg) {
         <input type="number" id="cfg-cleanup" value="${st.cleanup_interval_minutes || 60}" min="10" />
       </div>
       <div class="form-group">
-        <label>DB path</label>
+        <label style="display:flex; justify-content:space-between; align-items:center;">
+          <span>DB path</span>
+          ${state.dbSizeFormatted ? `<span style="font-size:11px; opacity:0.6; font-weight:normal;">${state.dbSizeFormatted}</span>` : ''}
+        </label>
         <input type="text" id="cfg-db-path" value="${esc(st.db_path || 'proxy_data.db')}" />
       </div>
     </div>

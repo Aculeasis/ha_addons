@@ -435,6 +435,28 @@ async def api_get_config(_: None = Depends(_require_auth)) -> Dict:
     return config
 
 
+@app.get("/api/db-size")
+async def api_db_size(_: None = Depends(_require_auth)) -> Dict:
+    db_path = config.get("storage", {}).get("db_path", "proxy_data.db")
+    p = Path(db_path)
+    if not p.exists():
+        return {"size": 0, "formatted": "0 B"}
+
+    size_bytes = p.stat().st_size
+
+    # Format size (KB, MB, GB with rounding to 1 decimal place)
+    if size_bytes < 1024:
+        formatted = f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        formatted = f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        formatted = f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        formatted = f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+    return {"size": size_bytes, "formatted": formatted}
+
+
 @app.post("/api/config")
 async def api_save_config(
     request: Request,
