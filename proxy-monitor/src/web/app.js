@@ -19,7 +19,62 @@ const state = {
   detailChart: null,
   editingProxyIndex: null,
   pendingConfig: null,
+  theme: localStorage.getItem('pm_theme') || 'system',
 };
+
+// ─── Theme ────────────────────────────────────────────────────────
+const THEME_ICONS = {
+  light: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  dark: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  system: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>'
+};
+
+function applyTheme(theme) {
+  state.theme = theme;
+  if (theme === 'system') {
+    document.documentElement.removeAttribute('data-theme');
+  } else {
+    document.documentElement.setAttribute('data-theme', theme);
+  }
+  localStorage.setItem('pm_theme', theme);
+  
+  // Update UI components
+  const themeIcon = document.getElementById('theme-icon');
+  if (themeIcon) themeIcon.innerHTML = THEME_ICONS[theme] || THEME_ICONS.system;
+
+  document.querySelectorAll('.theme-menu button').forEach(btn => {
+    btn.classList.toggle('active', btn.id === `theme-opt-${theme}`);
+  });
+
+  // Close menu
+  document.getElementById('theme-menu')?.classList.remove('show');
+
+  // Re-render chart if open
+  if (state.detailChart && state.detailProxyId) loadDetailChart();
+}
+
+function toggleThemeMenu(e) {
+  e.stopPropagation();
+  document.getElementById('theme-menu')?.classList.toggle('show');
+}
+
+// Close dropdowns on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.theme-switcher')) {
+    document.getElementById('theme-menu')?.classList.remove('show');
+  }
+});
+
+function initTheme() {
+  applyTheme(state.theme);
+  
+  // Listen for system theme changes
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (state.theme === 'system' && state.detailChart && state.detailProxyId) {
+      loadDetailChart();
+    }
+  });
+}
 
 // ─── API ──────────────────────────────────────────────────────────
 async function apiFetch(path, method = 'GET', body = null) {
@@ -154,11 +209,25 @@ function handleStats(data) {
 }
 
 function updateNav() {
-  const { total, alive, dead } = state.summary;
+  const { total, alive, partial, dead } = state.summary;
+
+  const names = { alive: [], partial: [], dead: [] };
+  state.proxies.forEach(p => {
+    const s = cardStatus(p);
+    if (names[s]) names[s].push(p.name);
+  });
+
+  const listHtml = (type) => {
+    if (!names[type].length) return '';
+    return `<div class="pill-list">${names[type].map(n => `<div class="pill-list-item">${esc(n)}</div>`).join('')}</div>`;
+  };
+
   document.getElementById('nav-pills').innerHTML = `
     <div class="pill total">Total: ${total}</div>
-    <div class="pill alive">🟢 Alive: ${alive}</div>
-    <div class="pill dead">🔴 Dead: ${dead}</div>`;
+    <div class="pill alive">🟢 Alive: ${alive}${listHtml('alive')}</div>
+    <div class="pill partial">🟡 Partial: ${partial}${listHtml('partial')}</div>
+    <div class="pill dead">🔴 Dead: ${dead}${listHtml('dead')}</div>`;
+
   if (state.lastUpdated) {
     const is12h = state.meta?.time_format === '12h';
     const d = new Date(state.lastUpdated * 1000);
@@ -279,27 +348,41 @@ function successRate(stats) {
   return t ? Math.round((stats.success / t) * 100) : 0;
 }
 
-function buildSparklineSvg(data) {
-  if (!data || data.length < 2) return '<svg></svg>';
+function buildSparklineSvg(tcp, udp, pid) {
   const W = 300, H = 40, pad = 2;
-  const max = Math.max(...data.map(d => d.success + d.fail), 1);
-  const rates = data.map(d => {
-    const t = d.success + d.fail;
-    return t ? d.success / t : 0;
-  });
-  const step = (W - 2 * pad) / (rates.length - 1);
-  const pts = rates.map((r, i) => `${pad + i * step},${H - pad - r * (H - 2 * pad)}`).join(' ');
-  const fill = `${pts} ${pad + (rates.length - 1) * step},${H} ${pad},${H}`;
+  const build = (data) => {
+    if (!data || data.length < 2) return null;
+    const rates = data.map(d => {
+      const t = d.success + d.fail;
+      return t ? d.success / t : 0;
+    });
+    const step = (W - 2 * pad) / (rates.length - 1);
+    const pts = rates.map((r, i) => `${pad + i * step},${H - pad - r * (H - 2 * pad)}`).join(' ');
+    const fill = `${pts} ${pad + (rates.length - 1) * step},${H} ${pad},${H}`;
+    return { pts, fill };
+  };
+
+  const t = build(tcp);
+  const u = build(udp);
+  if (!t && !u) return '<svg></svg>';
+
+  const id = String(pid).replace(/[^a-z0-9]/gi, '');
   return `
   <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
     <defs>
-      <linearGradient id="sg${data[0]?.ts || 0}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#5b8af5" stop-opacity="0.35"/>
+      <linearGradient id="gt${id}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#5b8af5" stop-opacity="0.3"/>
         <stop offset="100%" stop-color="#5b8af5" stop-opacity="0"/>
       </linearGradient>
+      <linearGradient id="gu${id}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#9b5cf5" stop-opacity="0.2"/>
+        <stop offset="100%" stop-color="#9b5cf5" stop-opacity="0"/>
+      </linearGradient>
     </defs>
-    <polygon points="${fill}" fill="url(#sg${data[0]?.ts || 0})"/>
-    <polyline points="${pts}" fill="none" stroke="#5b8af5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    ${t ? `<polygon points="${t.fill}" fill="url(#gt${id})"/>` : ''}
+    ${u ? `<polygon points="${u.fill}" fill="url(#gu${id})"/>` : ''}
+    ${t ? `<polyline points="${t.pts}" fill="none" stroke="#5b8af5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+    ${u ? `<polyline points="${u.pts}" fill="none" stroke="#9b5cf5" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
   </svg>`;
 }
 
@@ -308,9 +391,11 @@ function renderStatBlock(label, stats, windowStats) {
   const total = stats?.total || 0;
   if (!total) return '';
 
+  const color = label === 'TCP' ? 'var(--accent)' : (label === 'UDP' ? 'var(--accent2)' : 'var(--text3)');
+
   return `
   <div class="stat-row">
-    <div class="stat-label">${label}</div>
+    <div class="stat-label" style="color:${color}">${label}</div>
     <div class="stat-body">
       <div class="stat-bar-bg"><div class="stat-bar ${rate > 50 ? 'bar-alive' : 'bar-dead'}" style="width:${rate}%"></div></div>
       <div class="stat-nums">
@@ -347,8 +432,9 @@ function updateCard(el, proxy) {
   // Build latency column for card-header top-right
   function latBadgeHtml(label, lat, winStats) {
     const w = winStats || {};
+    const color = label === 'TCP' ? 'var(--accent)' : (label === 'UDP' ? 'var(--accent2)' : 'var(--text3)');
     return `<div class="lat-entry">
-      <span class="lat-label">${label}</span>
+      <span class="lat-label" style="color:${color}">${label}</span>
       <span class="stat-latency ${latencyClass(lat)}"
             onmouseenter="showLatTip(this,event)" onmouseleave="hideLatTip()"
             data-last="${lat ?? ''}" data-avg="${w.lat_avg ?? ''}"
@@ -363,8 +449,7 @@ function updateCard(el, proxy) {
     ? `<div class="card-lat">${latEntries.join('')}</div>` : '';
 
   const tags = (proxy.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
-  const sparkData = spark.tcp || spark.udp || [];
-  const sparkSvg = buildSparklineSvg(sparkData);
+  const sparkSvg = buildSparklineSvg(spark.tcp, spark.udp, proxy.id);
 
   const tcpBlock = proxy.tcp_check ? renderStatBlock('TCP', total.tcp, win.tcp) : '';
   const udpBlock = proxy.udp_check ? renderStatBlock('UDP', total.udp, win.udp) : '';
@@ -563,6 +648,12 @@ function renderDetailChart(series) {
 
   const ctx = canvas.getContext('2d');
 
+  const style = getComputedStyle(document.documentElement);
+  const colorText = style.getPropertyValue('--text2').trim() || '#9090b8';
+  const colorGrid = style.getPropertyValue('--border').trim() || 'rgba(180, 180, 200, 0.1)';
+  const colorBg = style.getPropertyValue('--bg2').trim() || '#0d0d1f';
+  const colorAccent = style.getPropertyValue('--accent').trim() || '#5b8af5';
+
   state.detailChart = new Chart(ctx, {
     type: 'bar',
     data: {
@@ -586,8 +677,8 @@ function renderDetailChart(series) {
           label: 'Avg Latency (ms)',
           data: latencies,
           type: 'line',
-          borderColor: '#5b8af5',
-          backgroundColor: 'rgba(91,138,245,0.1)',
+          borderColor: colorAccent,
+          backgroundColor: colorAccent + '1a', // 10% opacity
           borderWidth: 2,
           pointRadius: 2,
           yAxisID: 'y2',
@@ -606,8 +697,8 @@ function renderDetailChart(series) {
           type: 'time',
           stacked: true,
           offset: true,
-          grid: { color: 'rgba(255,255,255,0.05)' },
-          ticks: { color: '#8888a8', maxTicksLimit: 12 },
+          grid: { color: colorGrid },
+          ticks: { color: colorText, maxTicksLimit: 12 },
           time: {
             unit: state.detailGroupBy,
             tooltipFormat: state.meta?.time_format === '12h' ? 'dd MMM hh:mm a' : 'dd MMM HH:mm',
@@ -620,27 +711,27 @@ function renderDetailChart(series) {
         },
         y: {
           stacked: true,
-          grid: { color: 'rgba(255,255,255,0.05)' },
-          ticks: { color: '#8888a8', precision: 0 },
-          title: { display: true, text: 'Checks', color: '#5555aa' },
+          grid: { color: colorGrid },
+          ticks: { color: colorText, precision: 0 },
+          title: { display: true, text: 'Checks', color: colorText },
         },
         y2: {
           position: 'right',
           grid: { drawOnChartArea: false },
-          ticks: { color: '#5b8af5' },
-          title: { display: true, text: 'Latency ms', color: '#5b8af5' },
+          ticks: { color: colorAccent },
+          title: { display: true, text: 'Latency ms', color: colorAccent },
         },
       },
       plugins: {
         legend: {
-          labels: { color: '#9090b8', boxWidth: 12, padding: 16 },
+          labels: { color: colorText, boxWidth: 12, padding: 16 },
         },
         tooltip: {
-          backgroundColor: 'rgba(13,13,31,0.95)',
-          borderColor: 'rgba(91,138,245,0.3)',
+          backgroundColor: colorBg,
+          borderColor: colorGrid,
           borderWidth: 1,
-          titleColor: '#e8e8f5',
-          bodyColor: '#9090b8',
+          titleColor: style.getPropertyValue('--text').trim(),
+          bodyColor: colorText,
           padding: 10,
         },
       },
@@ -967,6 +1058,7 @@ async function init() {
     }
   } catch { /* server not ready yet, try anyway */ }
 
+  initTheme();
   connectWebSocket();
 }
 

@@ -237,7 +237,9 @@ async def _all_stats() -> Dict[str, Any]:
     proxies: List[Dict] = config.get("proxies", [])
     window = config.get("monitoring", {}).get("recent_window_minutes", 5)
     proxy_list: List[Dict] = []
-    alive = 0
+    alive_count = 0
+    partial_count = 0
+    dead_count = 0
 
     for proxy in proxies:
         pid = proxy_id(proxy)
@@ -245,18 +247,32 @@ async def _all_stats() -> Dict[str, Any]:
 
         last_checks: Dict = summary.get("last_checks", {})
         is_alive = False
+        all_clean = True
         external_ip: Optional[str] = None
 
         for ct in ["tcp", "udp"]:
-            if proxy.get(f"{ct}_check", ct == "tcp"):
+            # Check if this protocol is enabled for this proxy
+            # Default: TCP is enabled if not specified; UDP is disabled if not specified
+            enabled = proxy.get(f"{ct}_check", ct == "tcp")
+            if enabled:
                 lc = last_checks.get(ct, {})
                 if lc.get("success"):
                     is_alive = True
+                    if lc.get("error"):
+                        all_clean = False
+                else:
+                    all_clean = False
+
                 if lc.get("external_ip"):
                     external_ip = lc["external_ip"]
 
         if is_alive:
-            alive += 1
+            if all_clean:
+                alive_count += 1
+            else:
+                partial_count += 1
+        else:
+            dead_count += 1
 
         proxy_list.append(
             {
@@ -277,8 +293,9 @@ async def _all_stats() -> Dict[str, Any]:
         "proxies": proxy_list,
         "summary": {
             "total": len(proxies),
-            "alive": alive,
-            "dead": len(proxies) - alive,
+            "alive": alive_count,
+            "partial": partial_count,
+            "dead": dead_count,
         },
         "last_updated": int(time.time()),
         "meta": {
