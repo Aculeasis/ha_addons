@@ -20,6 +20,8 @@ on:
 jobs:
   detect-addons:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       addons: ${{ steps.detect.outputs.addons }}
     steps:
