@@ -1,5 +1,6 @@
 ARG BUILD_FROM
 FROM $BUILD_FROM
+LABEL org.opencontainers.image.source=https://github.com/Aculeasis/ha_addons
 
 # Set shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
