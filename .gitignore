@@ -30,8 +30,5 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Secrets / local config overrides
-config.yaml
-
 # systemd runtime
 *.pid
