@@ -5,7 +5,7 @@ async function openSettings() {
   document.getElementById('settings-modal').classList.remove('hidden');
   document.getElementById('settings-body').innerHTML =
     '<div style="text-align:center;padding:40px"><div class="spinner"></div></div>';
-  
+
   const [cfg, dbInfo] = await Promise.all([
     apiFetch('api/config'),
     apiFetch('api/db-size')

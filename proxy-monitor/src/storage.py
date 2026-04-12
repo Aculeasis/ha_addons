@@ -10,35 +10,73 @@ import aiosqlite
 logger = logging.getLogger(__name__)
 
 
+CHECK_TYPE_MAP = {"tcp": 1, "udp": 2}
+CHECK_TYPE_REV = {1: "tcp", 2: "udp"}
+
 class Storage:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
+        self._proxy_cache: Dict[str, int] = {}
 
     # ------------------------------------------------------------------ #
     #  Init                                                                #
     # ------------------------------------------------------------------ #
     async def init(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:
+            cur = await db.execute("PRAGMA table_info(proxy_checks)")
+            cols = [row[1] for row in await cur.fetchall()]
+            if cols and "external_ip" in cols:
+                logger.info("Outdated schema detected. Dropping old proxy_checks table...")
+                await db.execute("DROP TABLE proxy_checks")
+                await db.commit()
+
             await db.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS proxies (
+                    id INTEGER PRIMARY KEY,
+                    proxy_id TEXT UNIQUE NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS proxy_checks (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    proxy_id    TEXT    NOT NULL,
-                    check_type  TEXT    NOT NULL,   -- 'tcp' | 'udp'
-                    timestamp   INTEGER NOT NULL,   -- unix seconds
-                    success     INTEGER NOT NULL,   -- 0 | 1
+                    proxy_fk    INTEGER NOT NULL,
+                    check_type  INTEGER NOT NULL,
+                    timestamp   INTEGER NOT NULL,
+                    success     INTEGER NOT NULL,
+                    latency_ms  REAL
+                );
+                CREATE TABLE IF NOT EXISTS proxy_state (
+                    proxy_fk    INTEGER NOT NULL,
+                    check_type  INTEGER NOT NULL,
+                    timestamp   INTEGER NOT NULL,
+                    success     INTEGER NOT NULL,
                     latency_ms  REAL,
                     external_ip TEXT,
-                    error       TEXT
+                    error       TEXT,
+                    PRIMARY KEY (proxy_fk, check_type)
                 );
                 CREATE INDEX IF NOT EXISTS idx_proxy_ct_ts
-                    ON proxy_checks(proxy_id, check_type, timestamp DESC);
+                    ON proxy_checks(proxy_fk, check_type, timestamp DESC);
                 CREATE INDEX IF NOT EXISTS idx_ts
                     ON proxy_checks(timestamp);
                 """
             )
             await db.commit()
+            
+            cur = await db.execute("SELECT id, proxy_id FROM proxies")
+            for pid, p_str in await cur.fetchall():
+                self._proxy_cache[p_str] = pid
         logger.info("Storage initialised: %s", self.db_path)
+
+    async def _get_proxy_fk(self, db: aiosqlite.Connection, proxy_id: str) -> int:
+        if proxy_id in self._proxy_cache:
+            return self._proxy_cache[proxy_id]
+        await db.execute("INSERT OR IGNORE INTO proxies (proxy_id) VALUES (?)", (proxy_id,))
+        await db.commit()
+        cur = await db.execute("SELECT id FROM proxies WHERE proxy_id = ?", (proxy_id,))
+        row = await cur.fetchone()
+        if row:
+            self._proxy_cache[proxy_id] = row[0]
+            return row[0]
+        return 0
 
     # ------------------------------------------------------------------ #
     #  Write                                                               #
@@ -53,16 +91,32 @@ class Storage:
         external_ip: Optional[str] = None,
         error: Optional[str] = None,
     ) -> None:
+        ct_int = CHECK_TYPE_MAP.get(check_type, 1)
         async with aiosqlite.connect(self.db_path) as db:
+            proxy_fk = await self._get_proxy_fk(db, proxy_id)
             await db.execute(
                 """
                 INSERT INTO proxy_checks
-                    (proxy_id, check_type, timestamp, success, latency_ms, external_ip, error)
+                    (proxy_fk, check_type, timestamp, success, latency_ms)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    proxy_fk,
+                    ct_int,
+                    timestamp,
+                    1 if success else 0,
+                    latency_ms,
+                ),
+            )
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO proxy_state
+                    (proxy_fk, check_type, timestamp, success, latency_ms, external_ip, error)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    proxy_id,
-                    check_type,
+                    proxy_fk,
+                    ct_int,
                     timestamp,
                     1 if success else 0,
                     latency_ms,
@@ -83,15 +137,17 @@ class Storage:
         sparkline_start = now - 3600  # last 60 min for mini-chart
 
         async with aiosqlite.connect(self.db_path) as db:
+            proxy_fk = await self._get_proxy_fk(db, proxy_id)
+            
             # --- total aggregates per check_type ---
             async with db.execute(
                 """
                 SELECT check_type, SUM(success), COUNT(*)
                 FROM proxy_checks
-                WHERE proxy_id = ?
+                WHERE proxy_fk = ?
                 GROUP BY check_type
                 """,
-                (proxy_id,),
+                (proxy_fk,),
             ) as cur:
                 total_rows = await cur.fetchall()
 
@@ -105,10 +161,10 @@ class Storage:
                        MIN(CASE WHEN success=1 THEN latency_ms END) AS lat_min,
                        MAX(CASE WHEN success=1 THEN latency_ms END) AS lat_max
                 FROM proxy_checks
-                WHERE proxy_id = ? AND timestamp >= ?
+                WHERE proxy_fk = ? AND timestamp >= ?
                 GROUP BY check_type
                 """,
-                (proxy_id, window_start),
+                (proxy_fk, window_start),
             ) as cur:
                 window_rows = await cur.fetchall()
 
@@ -116,12 +172,10 @@ class Storage:
             async with db.execute(
                 """
                 SELECT check_type, success, latency_ms, external_ip, error, timestamp
-                FROM proxy_checks
-                WHERE proxy_id = ?
-                ORDER BY timestamp DESC
-                LIMIT 20
+                FROM proxy_state
+                WHERE proxy_fk = ?
                 """,
-                (proxy_id,),
+                (proxy_fk,),
             ) as cur:
                 last_rows = await cur.fetchall()
 
@@ -134,19 +188,20 @@ class Storage:
                        COUNT(*) - SUM(success) AS failures,
                        AVG(latency_ms)         AS avg_lat
                 FROM proxy_checks
-                WHERE proxy_id = ? AND timestamp >= ?
+                WHERE proxy_fk = ? AND timestamp >= ?
                 GROUP BY check_type, bucket
                 ORDER BY bucket ASC
                 """,
-                (proxy_id, sparkline_start),
+                (proxy_fk, sparkline_start),
             ) as cur:
                 sparkline_rows = await cur.fetchall()
 
         def _agg_simple(rows: list) -> Dict[str, Dict]:
             """Totals – 3-column rows (no latency)."""
             out: Dict[str, Dict] = {}
-            for check_type, success, total in rows:
-                out[check_type] = {
+            for ct_int, success, total in rows:
+                ct = CHECK_TYPE_REV.get(ct_int, "tcp")
+                out[ct] = {
                     "success": int(success or 0),
                     "fail": int(total - (success or 0)),
                     "total": int(total),
@@ -159,8 +214,9 @@ class Storage:
         def _agg_window(rows: list) -> Dict[str, Dict]:
             """Window stats - 6-column rows (includes latency avg/min/max)."""
             out: Dict[str, Dict] = {}
-            for check_type, success, total, lat_avg, lat_min, lat_max in rows:
-                out[check_type] = {
+            for ct_int, success, total, lat_avg, lat_min, lat_max in rows:
+                ct = CHECK_TYPE_REV.get(ct_int, "tcp")
+                out[ct] = {
                     "success": int(success or 0),
                     "fail": int(total - (success or 0)),
                     "total": int(total),
@@ -173,7 +229,7 @@ class Storage:
         # one entry per check_type (most recent)
         last_checks: Dict[str, Dict] = {}
         for row in last_rows:
-            ct = row[0]
+            ct = CHECK_TYPE_REV.get(row[0], "tcp")
             if ct not in last_checks:
                 last_checks[ct] = {
                     "success": bool(row[1]),
@@ -185,7 +241,7 @@ class Storage:
 
         sparkline: Dict[str, List[Dict]] = {}
         for row in sparkline_rows:
-            ct = row[0]
+            ct = CHECK_TYPE_REV.get(row[0], "tcp")
             sparkline.setdefault(ct, []).append(
                 {
                     "ts": row[1],
@@ -216,6 +272,7 @@ class Storage:
         interval = {"minute": 60, "hour": 3600, "day": 86400}.get(group_by, 3600)
 
         async with aiosqlite.connect(self.db_path) as db:
+            proxy_fk = await self._get_proxy_fk(db, proxy_id)
             async with db.execute(
                 """
                 SELECT check_type,
@@ -226,17 +283,17 @@ class Storage:
                        MIN(latency_ms)      AS min_lat,
                        MAX(latency_ms)      AS max_lat
                 FROM proxy_checks
-                WHERE proxy_id = ? AND timestamp >= ?
+                WHERE proxy_fk = ? AND timestamp >= ?
                 GROUP BY check_type, bucket
                 ORDER BY bucket ASC
                 """,
-                (interval, interval, proxy_id, from_ts),
+                (interval, interval, proxy_fk, from_ts),
             ) as cur:
                 rows = await cur.fetchall()
 
         result: Dict[str, List[Dict]] = {}
         for row in rows:
-            ct = row[0]
+            ct = CHECK_TYPE_REV.get(row[0], "tcp")
             result.setdefault(ct, []).append(
                 {
                     "ts": row[1],
@@ -260,8 +317,14 @@ class Storage:
             )
             await db.commit()
             deleted = cur.rowcount
+            
         if deleted:
+            # VACUUM reclaims unused disk space. It cannot run in a transaction.
+            async with aiosqlite.connect(self.db_path, isolation_level=None) as db:
+                await db.execute("VACUUM")
+                
             logger.info(
-                "Cleaned %d old check records (retention=%dd)", deleted, retention_days
+                "Cleaned %d old records (retention=%dd) and vacuumed database", 
+                deleted, retention_days
             )
         return deleted
