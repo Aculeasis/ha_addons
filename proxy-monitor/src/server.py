@@ -458,10 +458,29 @@ async def api_get_config(_: None = Depends(_require_auth)) -> Dict:
 
 @app.get("/api/db-size")
 async def api_db_size(_: None = Depends(_require_auth)) -> Dict:
-    db_path = config.get("storage", {}).get("db_path", "proxy_data.db")
-    p, root = Path(db_path).resolve(), Path.cwd().resolve()
+    db_path = str(config.get("storage", {}).get("db_path", "proxy_data.db"))
+    try:
+        p = Path(db_path).resolve()
+    except Exception:
+        return {"size": 0, "formatted": "Error"}
 
-    if not (p.is_file() and root in p.parents):
+    # Define allowed roots for database location
+    roots = [Path.cwd().resolve()]
+    data_dir = Path("/data")
+    if data_dir.exists():
+        roots.append(data_dir.resolve())
+
+    # Check if the path is within any allowed root
+    is_safe = False
+    for r in roots:
+        try:
+            if p.is_relative_to(r):
+                is_safe = True
+                break
+        except ValueError:
+            continue
+
+    if not (p.is_file() and is_safe):
         return {"size": 0, "formatted": "0 B" if not p.exists() else "N/A"}
 
     size_bytes = p.stat().st_size
@@ -571,12 +590,13 @@ async def serve_root() -> FileResponse:
 @app.get("/{path:path}")
 async def serve_static(path: str) -> FileResponse:
     try:
-        # Resolve path to handle '..' and ensure it's absolute
-        fp = (WEB_DIR / path).resolve()
         root = WEB_DIR.resolve()
+        # Resolve path to handle '..' and ensure it's absolute
+        # We lstrip to prevent Path from treating it as an absolute path when joining
+        fp = (root / path.lstrip("/\\")).resolve()
         
         # Check if the file is within WEB_DIR and exists
-        if fp.is_file() and root in fp.parents:
+        if fp.is_file() and fp.is_relative_to(root):
             return FileResponse(fp)
     except Exception:
         pass
