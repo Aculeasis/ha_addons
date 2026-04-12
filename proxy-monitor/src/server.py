@@ -459,9 +459,10 @@ async def api_get_config(_: None = Depends(_require_auth)) -> Dict:
 @app.get("/api/db-size")
 async def api_db_size(_: None = Depends(_require_auth)) -> Dict:
     db_path = config.get("storage", {}).get("db_path", "proxy_data.db")
-    p = Path(db_path)
-    if not p.exists():
-        return {"size": 0, "formatted": "0 B"}
+    p, root = Path(db_path).resolve(), Path.cwd().resolve()
+
+    if not (p.is_file() and root in p.parents):
+        return {"size": 0, "formatted": "0 B" if not p.exists() else "N/A"}
 
     size_bytes = p.stat().st_size
 
@@ -569,10 +570,19 @@ async def serve_root() -> FileResponse:
 
 @app.get("/{path:path}")
 async def serve_static(path: str) -> FileResponse:
-    fp = WEB_DIR / path
-    if fp.exists() and fp.is_file():
-        return FileResponse(fp)
+    try:
+        # Resolve path to handle '..' and ensure it's absolute
+        fp = (WEB_DIR / path).resolve()
+        root = WEB_DIR.resolve()
+        
+        # Check if the file is within WEB_DIR and exists
+        if fp.is_file() and root in fp.parents:
+            return FileResponse(fp)
+    except Exception:
+        pass
+
     return FileResponse(WEB_DIR / "index.html")
+
 
 
 # ------------------------------------------------------------------ #
