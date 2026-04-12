@@ -56,28 +56,43 @@ class ProxyChecker:
                 timeout=aiohttp.ClientTimeout(total=timeout),
             ) as session:
                 async with session.get(test_url) as resp:
-                    data = await resp.json(content_type=None)
+                    status = resp.status
+                    latency = (time.monotonic() - start) * 1000
+                    
+                    ip = None
+                    error = None
+                    
+                    # If we got a response, the proxy is alive.
+                    # We try to parse the IP, but if we can't, it's still a "success" (alive).
+                    try:
+                        data = await resp.json(content_type=None)
+                        ip = (
+                            data.get("origin")
+                            or data.get("ip")
+                            or data.get("query")
+                            or None
+                        )
+                        if ip and "," in ip:
+                            ip = ip.split(",")[0].strip()
+                        
+                        if not (200 <= status < 300):
+                            error = f"HTTP {status}"
+                    except Exception as json_exc:
+                        error = f"HTTP {status}, Parse error: {str(json_exc)[:50]}"
+                    
+                    return {
+                        "success": True,
+                        "latency_ms": round(latency, 2),
+                        "external_ip": ip,
+                        "error": error,
+                    }
 
-            latency = (time.monotonic() - start) * 1000
-            ip = (
-                data.get("origin")
-                or data.get("ip")
-                or data.get("query")
-                or None
-            )
-            if ip and "," in ip:
-                ip = ip.split(",")[0].strip()
-
-            return {
-                "success": True,
-                "latency_ms": round(latency, 2),
-                "external_ip": ip,
-                "error": None,
-            }
         except Exception as exc:
+            # This catch handles connection errors (proxy down, timeout, etc.)
+            latency = (time.monotonic() - start) * 1000
             return {
                 "success": False,
-                "latency_ms": round((time.monotonic() - start) * 1000, 2),
+                "latency_ms": round(latency, 2),
                 "external_ip": None,
                 "error": str(exc)[:250],
             }

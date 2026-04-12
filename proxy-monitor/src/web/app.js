@@ -31,11 +31,11 @@ async function apiFetch(path, method = 'GET', body = null) {
       headers,
       body: body !== null ? JSON.stringify(body) : undefined,
     });
-    if (res.status === 401) { 
+    if (res.status === 401) {
       state.sessionToken = '';
       sessionStorage.removeItem('pm_token');
-      showLogin(); 
-      return null; 
+      showLogin();
+      return null;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
@@ -125,16 +125,16 @@ function connectWebSocket() {
   ws.onclose = (ev) => {
     state.wsConnected = false;
     document.getElementById('ws-dot').className = 'ws-dot';
-    if (ev.code === 4401) { 
+    if (ev.code === 4401) {
       state.sessionToken = '';
       sessionStorage.removeItem('pm_token');
-      showLogin(); 
-      return; 
+      showLogin();
+      return;
     }
     wsTimer = setTimeout(() => { wsDelay = Math.min(wsDelay * 2, 30000); connectWebSocket(); }, wsDelay);
   };
 
-  ws.onerror = () => {};
+  ws.onerror = () => { };
 
   // keepalive
   setInterval(() => {
@@ -144,10 +144,10 @@ function connectWebSocket() {
 
 // ─── Stats update ─────────────────────────────────────────────────
 function handleStats(data) {
-  state.proxies     = data.proxies || [];
-  state.summary     = data.summary || {};
+  state.proxies = data.proxies || [];
+  state.summary = data.summary || {};
   state.lastUpdated = data.last_updated;
-  state.meta        = data.meta || {};
+  state.meta = data.meta || {};
   updateNav();
   renderGrid();
   if (state.detailProxyId) updateDetailStats();
@@ -194,13 +194,20 @@ function renderGrid() {
 }
 
 function cardStatus(proxy) {
-  const hasTcp = proxy.tcp_check;
-  const hasUdp = proxy.udp_check;
+  const hasTcp = !!proxy.tcp_check;
+  const hasUdp = !!proxy.udp_check;
   const lc = proxy.stats?.last_checks || {};
-  const tcpOk = !hasTcp || lc.tcp?.success;
-  const udpOk = !hasUdp || lc.udp?.success;
-  if (proxy.is_alive && tcpOk && udpOk) return 'alive';
-  if (proxy.is_alive || tcpOk || udpOk) return 'partial';
+
+  const tcpRes = lc.tcp || {};
+  const udpRes = lc.udp || {};
+
+  // A check is "clean" if it is successful AND has no error message
+  const tcpClean = !hasTcp || (!!tcpRes.success && !tcpRes.error);
+  const udpClean = !hasUdp || (!!udpRes.success && !udpRes.error);
+
+  // proxy.is_alive is already computed by the server as (enabled_tcp_success || enabled_udp_success)
+  if (proxy.is_alive && tcpClean && udpClean) return 'alive';
+  if (proxy.is_alive) return 'partial';
   return 'dead';
 }
 
@@ -228,9 +235,9 @@ function _tipRow(label, val, color = '') {
 
 function showLatTip(badge, e) {
   const last = parseFloat(badge.dataset.last) || null;
-  const avg  = parseFloat(badge.dataset.avg)  || null;
-  const min  = parseFloat(badge.dataset.min)  || null;
-  const max  = parseFloat(badge.dataset.max)  || null;
+  const avg = parseFloat(badge.dataset.avg) || null;
+  const min = parseFloat(badge.dataset.min) || null;
+  const max = parseFloat(badge.dataset.max) || null;
   const label = badge.dataset.label || '';
   const wm = state.meta?.window_minutes || 5;
   _latTip.innerHTML = `
@@ -248,10 +255,10 @@ function _positionTip(e) {
   const tw = _latTip.offsetWidth, th = _latTip.offsetHeight;
   let x = e.clientX - tw / 2;
   let y = e.clientY - th - 12;
-  x = Math.max(8, Math.min(x, window.innerWidth  - tw - 8));
+  x = Math.max(8, Math.min(x, window.innerWidth - tw - 8));
   if (y < 8) y = e.clientY + 16;
   _latTip.style.left = x + 'px';
-  _latTip.style.top  = y + 'px';
+  _latTip.style.top = y + 'px';
 }
 
 function latencyClass(ms) {
@@ -297,7 +304,7 @@ function buildSparklineSvg(data) {
 }
 
 function renderStatBlock(label, stats, windowStats) {
-  const rate  = successRate(stats);
+  const rate = successRate(stats);
   const total = stats?.total || 0;
   if (!total) return '';
 
@@ -328,9 +335,9 @@ function updateCard(el, proxy) {
   const status = cardStatus(proxy);
   el.className = `proxy-card ${status}-card`;
 
-  const lc    = proxy.stats?.last_checks || {};
+  const lc = proxy.stats?.last_checks || {};
   const total = proxy.stats?.total || {};
-  const win   = proxy.stats?.window || {};
+  const win = proxy.stats?.window || {};
   const spark = proxy.stats?.sparkline || {};
 
   // per-type last latency
@@ -357,7 +364,7 @@ function updateCard(el, proxy) {
 
   const tags = (proxy.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
   const sparkData = spark.tcp || spark.udp || [];
-  const sparkSvg  = buildSparklineSvg(sparkData);
+  const sparkSvg = buildSparklineSvg(sparkData);
 
   const tcpBlock = proxy.tcp_check ? renderStatBlock('TCP', total.tcp, win.tcp) : '';
   const udpBlock = proxy.udp_check ? renderStatBlock('UDP', total.udp, win.udp) : '';
@@ -384,7 +391,7 @@ function updateCard(el, proxy) {
 
 // ─── Escape html ──────────────────────────────────────────────────
 function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ─── Privacy Mode ──────────────────────────────────────────────────
@@ -392,7 +399,7 @@ function togglePrivacyMode() {
   const isPrivate = document.body.classList.toggle('privacy-mode');
   const icon = document.getElementById('eye-icon');
   if (!icon) return;
-  
+
   if (isPrivate) {
     icon.innerHTML = `<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/>`;
     toast('info', 'Privacy mode enabled');
@@ -430,7 +437,7 @@ function closeDetailIfBg(e) {
 
 // Build only the info-blocks HTML (called both on first render and on live updates)
 function buildDetailInfoHtml(proxy) {
-  const lc  = proxy.stats?.last_checks || {};
+  const lc = proxy.stats?.last_checks || {};
   const tot = proxy.stats?.total || {};
   const primaryLc = lc[state.detailCheckType] || lc.tcp || lc.udp;
   const lat = primaryLc?.latency_ms;
@@ -492,17 +499,17 @@ function renderDetailHeader(proxy) {
   <div class="chart-controls">
     ${ctrlTypes.length > 1 ? `<div class="ctrl-group">${typeButtons}</div><span style="color:var(--border);margin:0 4px">|</span>` : ''}
     <div class="ctrl-group" id="hours-ctrl">
-      ${[[1,'1h'],[6,'6h'],[24,'24h'],[168,'7d'],[720,'30d']].map(([h,l]) =>
-        `<button class="ctrl-btn ${state.detailHours === h ? 'active' : ''}"
+      ${[[1, '1h'], [6, '6h'], [24, '24h'], [168, '7d'], [720, '30d']].map(([h, l]) =>
+    `<button class="ctrl-btn ${state.detailHours === h ? 'active' : ''}"
            onclick="setDetailHours(${h})">${l}</button>`
-      ).join('')}
+  ).join('')}
     </div>
     <span style="color:var(--border);margin:0 4px">|</span>
     <div class="ctrl-group" id="group-ctrl">
-      ${[['minute','Min'],['hour','Hour'],['day','Day']].map(([v,l]) =>
-        `<button class="ctrl-btn ${state.detailGroupBy === v ? 'active' : ''}"
+      ${[['minute', 'Min'], ['hour', 'Hour'], ['day', 'Day']].map(([v, l]) =>
+    `<button class="ctrl-btn ${state.detailGroupBy === v ? 'active' : ''}"
            onclick="setDetailGroupBy('${v}')">${l}</button>`
-      ).join('')}
+  ).join('')}
     </div>
   </div>
 
@@ -522,9 +529,9 @@ function updateDetailStats() {
   }
 }
 
-function setDetailType(t)  { state.detailCheckType = t; renderDetailHeader(state.proxies.find(p=>p.id===state.detailProxyId)||{}); loadDetailChart(); }
-function setDetailHours(h) { state.detailHours = h; renderDetailHeader(state.proxies.find(p=>p.id===state.detailProxyId)||{}); loadDetailChart(); }
-function setDetailGroupBy(g){ state.detailGroupBy = g; renderDetailHeader(state.proxies.find(p=>p.id===state.detailProxyId)||{}); loadDetailChart(); }
+function setDetailType(t) { state.detailCheckType = t; renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); loadDetailChart(); }
+function setDetailHours(h) { state.detailHours = h; renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); loadDetailChart(); }
+function setDetailGroupBy(g) { state.detailGroupBy = g; renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); loadDetailChart(); }
 
 async function loadDetailChart() {
   if (!state.detailProxyId) return;
@@ -532,7 +539,7 @@ async function loadDetailChart() {
 
   const params = new URLSearchParams({
     proxy_id: state.detailProxyId,
-    hours:    state.detailHours,
+    hours: state.detailHours,
     group_by: state.detailGroupBy,
   });
   const data = await apiFetch(`api/proxy/chart?${params}`);
@@ -549,10 +556,10 @@ function renderDetailChart(series) {
 
   if (state.detailChart) { state.detailChart.destroy(); state.detailChart = null; }
 
-  const labels     = series.map(d => new Date(d.ts * 1000));
-  const successes  = series.map(d => d.successes);
-  const failures   = series.map(d => d.failures);
-  const latencies  = series.map(d => d.avg_latency);
+  const labels = series.map(d => new Date(d.ts * 1000));
+  const successes = series.map(d => d.successes);
+  const failures = series.map(d => d.failures);
+  const latencies = series.map(d => d.avg_latency);
 
   const ctx = canvas.getContext('2d');
 
@@ -601,14 +608,14 @@ function renderDetailChart(series) {
           offset: true,
           grid: { color: 'rgba(255,255,255,0.05)' },
           ticks: { color: '#8888a8', maxTicksLimit: 12 },
-          time: { 
-            unit: state.detailGroupBy, 
-            tooltipFormat: state.meta?.time_format === '12h' ? 'dd MMM hh:mm a' : 'dd MMM HH:mm', 
-            displayFormats: { 
-              minute: state.meta?.time_format === '12h' ? 'hh:mm a' : 'HH:mm', 
-              hour: state.meta?.time_format === '12h' ? 'dd hh:mm a' : 'dd HH:mm', 
-              day: 'dd MMM' 
-            } 
+          time: {
+            unit: state.detailGroupBy,
+            tooltipFormat: state.meta?.time_format === '12h' ? 'dd MMM hh:mm a' : 'dd MMM HH:mm',
+            displayFormats: {
+              minute: state.meta?.time_format === '12h' ? 'hh:mm a' : 'HH:mm',
+              hour: state.meta?.time_format === '12h' ? 'dd hh:mm a' : 'dd HH:mm',
+              day: 'dd MMM'
+            }
           },
         },
         y: {
@@ -787,29 +794,29 @@ function collectConfig() {
   const cfg = state.pendingConfig;
   cfg.server = {
     ...cfg.server,
-    host:     document.getElementById('cfg-host')?.value || '0.0.0.0',
-    port:     parseInt(document.getElementById('cfg-port')?.value || '8080'),
+    host: document.getElementById('cfg-host')?.value || '0.0.0.0',
+    port: parseInt(document.getElementById('cfg-port')?.value || '8080'),
     username: document.getElementById('cfg-username')?.value || 'admin',
     password: document.getElementById('cfg-password')?.value || '',
     trusted_ips: (document.getElementById('cfg-trusted-ips')?.value || '')
-                   .split('\n').map(s => s.trim()).filter(Boolean),
+      .split('\n').map(s => s.trim()).filter(Boolean),
     whitelist: (document.getElementById('cfg-whitelist-ips')?.value || '')
-                   .split('\n').map(s => s.trim()).filter(Boolean),
+      .split('\n').map(s => s.trim()).filter(Boolean),
     time_format: document.getElementById('cfg-time-format')?.value || '24h',
   };
   cfg.monitoring = {
     ...cfg.monitoring,
     check_interval_seconds: parseInt(document.getElementById('cfg-check-interval')?.value || '60'),
-    check_timeout_seconds:  parseInt(document.getElementById('cfg-timeout')?.value || '10'),
-    concurrent_checks:      parseInt(document.getElementById('cfg-concurrent')?.value || '10'),
-    recent_window_minutes:  parseInt(document.getElementById('cfg-window')?.value || '5'),
-    tcp_test_url:           document.getElementById('cfg-test-url')?.value || 'http://httpbin.org/ip',
+    check_timeout_seconds: parseInt(document.getElementById('cfg-timeout')?.value || '10'),
+    concurrent_checks: parseInt(document.getElementById('cfg-concurrent')?.value || '10'),
+    recent_window_minutes: parseInt(document.getElementById('cfg-window')?.value || '5'),
+    tcp_test_url: document.getElementById('cfg-test-url')?.value || 'http://httpbin.org/ip',
   };
   cfg.storage = {
     ...cfg.storage,
-    retention_days:           parseInt(document.getElementById('cfg-retention')?.value || '30'),
+    retention_days: parseInt(document.getElementById('cfg-retention')?.value || '30'),
     cleanup_interval_minutes: parseInt(document.getElementById('cfg-cleanup')?.value || '60'),
-    db_path:                  document.getElementById('cfg-db-path')?.value || 'proxy_data.db',
+    db_path: document.getElementById('cfg-db-path')?.value || 'proxy_data.db',
   };
   return cfg;
 }
@@ -923,10 +930,10 @@ function deleteProxy(index) {
   state.editingProxyIndex = index;
   const p = state.pendingConfig.proxies[index];
   if (!p) return;
-  
+
   const container = document.getElementById('proxy-edit-container');
   if (!container) return;
-  
+
   container.innerHTML = `
   <div class="proxy-edit-form" style="border-color: rgba(245,74,74,0.35);">
     <h4 style="color: var(--danger);">Confirm Deletion</h4>
