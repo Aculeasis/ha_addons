@@ -6,6 +6,7 @@ This is a custom Home Assistant add-on repository.
 
 * **[gost-ss](gost-ss/)**: GOST / Shadowsocks client and proxy add-on.
 * **[privoxy](privoxy/)**: Privoxy non-caching web proxy add-on.
+* **[proxy-monitor](proxy-monitor/)**: Real-time SOCKS5 proxy monitoring dashboard.
 * **[xray](xray/)**: Xray-core proxy add-on.
 
 ## Installation

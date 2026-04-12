@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proxy Monitor</title>
+  <meta name="description" content="Real-time SOCKS5 proxy monitoring dashboard with TCP and UDP checks, historical charts and web-based configuration." />
+  <link rel="stylesheet" href="style.css" />
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- Chart.js date adapter (for time scale) -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!--  NAV                                                            -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<nav class="nav" id="main-nav">
+  <div class="nav-logo">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="url(#grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <defs>
+        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#5b8af5"/>
+          <stop offset="100%" stop-color="#9b5cf5"/>
+        </linearGradient>
+      </defs>
+      <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/>
+      <line x1="12" y1="2" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="22"/>
+      <line x1="2" y1="12" x2="8" y2="12"/><line x1="16" y1="12" x2="22" y2="12"/>
+    </svg>
+    <span class="brand">Proxy Monitor</span>
+  </div>
+
+  <div class="nav-pills" id="nav-pills"></div>
+
+  <div class="nav-right">
+    <div class="ws-dot" id="ws-dot" title="WebSocket connection"></div>
+    <span class="last-updated" id="last-updated">—</span>
+    <button class="btn btn-ghost btn-sm" id="btn-settings" onclick="openSettings()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Settings
+    </button>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!--  MAIN                                                           -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<main class="container">
+  <!-- ── Page tabs ─── -->
+  <div class="page-tabs">
+    <button class="tab-btn active" id="tab-privacy-toggle" onclick="togglePrivacyMode()" title="Privacy Mode (Blur sensitive data)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="eye-icon"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+  </div>
+
+  <!-- ── Dashboard ─── -->
+  <div id="page-dashboard">
+    <div class="proxy-grid" id="proxy-grid">
+      <div class="empty-state" id="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+        <p>Connecting…</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!--  DETAIL MODAL                                                   -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay detail-modal hidden" id="detail-modal" onclick="closeDetailIfBg(event)">
+  <div class="modal" style="width:min(1000px,96vw);max-height:90vh;">
+    <div class="modal-header">
+      <h2 id="detail-title">Proxy detail</h2>
+      <button class="modal-close" onclick="closeDetail()">×</button>
+    </div>
+    <div class="modal-body" id="detail-body">
+      <!-- rendered by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!--  SETTINGS MODAL                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay settings-modal hidden" id="settings-modal" onclick="closeSettingsIfBg(event)">
+  <div class="modal" style="width:min(820px,96vw);max-height:90vh;">
+    <div class="modal-header">
+      <h2>Settings</h2>
+      <button class="modal-close" onclick="closeSettings()">×</button>
+    </div>
+    <div class="modal-body" id="settings-body">
+      <div style="text-align:center;padding:40px"><div class="spinner"></div></div>
+    </div>
+    <div style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!--  LOGIN MODAL                                                    -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay login-modal hidden" id="login-modal">
+  <div class="modal" style="width:min(360px,96vw);">
+    <div class="modal-header">
+      <h2>Sign In</h2>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+      <div class="login-logo">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#5b8af5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/>
+        </svg>
+        <p>Proxy Monitor</p>
+      </div>
+      <div class="form-group">
+        <label for="login-user">Username</label>
+        <input type="text" id="login-user" placeholder="admin" autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label for="login-pass">Password</label>
+        <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter') doLogin()" />
+      </div>
+      <span class="login-error hidden" id="login-error"></span>
+      <button class="btn btn-primary" id="login-btn" onclick="doLogin()" style="width:100%">Sign In</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!--  TOASTS                                                         -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="toast-container"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

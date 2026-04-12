@@ -1,0 +1,23 @@
+server:
+  host: "0.0.0.0"
+  port: 8099
+  username: "admin"
+  password: ""
+  trusted_ips:
+    - "172.30.32.2"
+  whitelist:
+    - "172.30.32.2"
+
+storage:
+  db_path: "/data/proxy_data.db"
+  retention_days: 30
+  cleanup_interval_minutes: 60
+
+monitoring:
+  check_interval_seconds: 60
+  check_timeout_seconds: 10
+  concurrent_checks: 10
+  recent_window_minutes: 5
+  tcp_test_url: "http://httpbin.org/ip"
+
+proxies: []
