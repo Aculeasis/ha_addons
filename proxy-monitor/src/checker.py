@@ -11,7 +11,7 @@ import logging
 import socket
 import struct
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
@@ -58,10 +58,10 @@ class ProxyChecker:
                 async with session.get(test_url) as resp:
                     status = resp.status
                     latency = (time.monotonic() - start) * 1000
-                    
+
                     ip = None
                     error = None
-                    
+
                     # If we got a response, the proxy is alive.
                     # We try to parse the IP, but if we can't, it's still a "success" (alive).
                     try:
@@ -74,12 +74,12 @@ class ProxyChecker:
                         )
                         if ip and "," in ip:
                             ip = ip.split(",")[0].strip()
-                        
+
                         if not (200 <= status < 300):
                             error = f"HTTP {status}"
                     except Exception as json_exc:
                         error = f"HTTP {status}, Parse error: {str(json_exc)[:50]}"
-                    
+
                     return {
                         "success": True,
                         "latency_ms": round(latency, 2),

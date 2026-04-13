@@ -129,134 +129,100 @@ class Storage:
     # ------------------------------------------------------------------ #
     #  Read – summary (used by WebSocket broadcast)                       #
     # ------------------------------------------------------------------ #
-    async def get_proxy_summary(
-        self, proxy_id: str, window_minutes: int = 5
-    ) -> Dict[str, Any]:
+    async def get_all_summaries(
+        self, window_minutes: int = 5
+    ) -> Dict[str, Dict[str, Any]]:
+        """Fetch stats for ALL proxies in 4 bulk queries instead of N*4 queries."""
         now = int(time.time())
         window_start = now - window_minutes * 60
-        sparkline_start = now - 3600  # last 60 min for mini-chart
+        sparkline_start = now - 3600
 
         async with aiosqlite.connect(self.db_path) as db:
-            proxy_fk = await self._get_proxy_fk(db, proxy_id)
-            
-            # --- total aggregates per check_type ---
+            # 1. Totals
             async with db.execute(
-                """
-                SELECT check_type, SUM(success), COUNT(*)
-                FROM proxy_checks
-                WHERE proxy_fk = ?
-                GROUP BY check_type
-                """,
-                (proxy_fk,),
+                "SELECT proxy_fk, check_type, SUM(success), COUNT(*) FROM proxy_checks GROUP BY proxy_fk, check_type"
             ) as cur:
                 total_rows = await cur.fetchall()
 
-            # --- window aggregates (includes latency stats for tooltip) ---
+            # 2. Window stats
             async with db.execute(
                 """
-                SELECT check_type,
-                       SUM(success),
-                       COUNT(*),
-                       AVG(CASE WHEN success=1 THEN latency_ms END) AS lat_avg,
-                       MIN(CASE WHEN success=1 THEN latency_ms END) AS lat_min,
-                       MAX(CASE WHEN success=1 THEN latency_ms END) AS lat_max
-                FROM proxy_checks
-                WHERE proxy_fk = ? AND timestamp >= ?
-                GROUP BY check_type
+                SELECT proxy_fk, check_type, SUM(success), COUNT(*),
+                       AVG(CASE WHEN success=1 THEN latency_ms END),
+                       MIN(CASE WHEN success=1 THEN latency_ms END),
+                       MAX(CASE WHEN success=1 THEN latency_ms END)
+                FROM proxy_checks WHERE timestamp >= ? GROUP BY proxy_fk, check_type
                 """,
-                (proxy_fk, window_start),
+                (window_start,),
             ) as cur:
                 window_rows = await cur.fetchall()
 
-            # --- last result per check_type ---
+            # 3. Last states
             async with db.execute(
-                """
-                SELECT check_type, success, latency_ms, external_ip, error, timestamp
-                FROM proxy_state
-                WHERE proxy_fk = ?
-                """,
-                (proxy_fk,),
+                "SELECT proxy_fk, check_type, success, latency_ms, external_ip, error, timestamp FROM proxy_state"
             ) as cur:
                 last_rows = await cur.fetchall()
 
-            # --- sparkline: last 60 min, bucketed by minute ---
+            # 4. Sparklines
             async with db.execute(
                 """
-                SELECT check_type,
-                       (timestamp / 60) * 60  AS bucket,
-                       SUM(success)            AS successes,
-                       COUNT(*) - SUM(success) AS failures,
-                       AVG(latency_ms)         AS avg_lat
-                FROM proxy_checks
-                WHERE proxy_fk = ? AND timestamp >= ?
-                GROUP BY check_type, bucket
-                ORDER BY bucket ASC
+                SELECT proxy_fk, check_type, (timestamp / 60) * 60 AS bucket,
+                       SUM(success), COUNT(*) - SUM(success), AVG(latency_ms)
+                FROM proxy_checks WHERE timestamp >= ? GROUP BY proxy_fk, check_type, bucket ORDER BY bucket ASC
                 """,
-                (proxy_fk, sparkline_start),
+                (sparkline_start,),
             ) as cur:
                 sparkline_rows = await cur.fetchall()
 
-        def _agg_simple(rows: list) -> Dict[str, Dict]:
-            """Totals – 3-column rows (no latency)."""
-            out: Dict[str, Dict] = {}
-            for ct_int, success, total in rows:
-                ct = CHECK_TYPE_REV.get(ct_int, "tcp")
-                out[ct] = {
-                    "success": int(success or 0),
-                    "fail": int(total - (success or 0)),
-                    "total": int(total),
-                }
-            return out
+        fk_to_id = {v: k for k, v in self._proxy_cache.items()}
+        by_proxy: Dict[str, List[list]] = {pid: [[], [], [], []] for pid in self._proxy_cache}
 
+        for r in total_rows:
+            if pid := fk_to_id.get(r[0]): by_proxy[pid][0].append(r[1:])
+        for r in window_rows:
+            if pid := fk_to_id.get(r[0]): by_proxy[pid][1].append(r[1:])
+        for r in last_rows:
+            if pid := fk_to_id.get(r[0]): by_proxy[pid][2].append(r[1:])
+        for r in sparkline_rows:
+            if pid := fk_to_id.get(r[0]): by_proxy[pid][3].append(r[1:])
+
+        return {pid: self._assemble_summary(*rows) for pid, rows in by_proxy.items()}
+
+    def _assemble_summary(
+        self, total_rows: list, window_rows: list, last_rows: list, sparkline_rows: list
+    ) -> Dict[str, Any]:
+        """Helper to structure raw DB rows into the summary dictionary."""
         def _round(v: Optional[float]) -> Optional[float]:
             return round(v, 1) if v is not None else None
 
-        def _agg_window(rows: list) -> Dict[str, Dict]:
-            """Window stats - 6-column rows (includes latency avg/min/max)."""
-            out: Dict[str, Dict] = {}
-            for ct_int, success, total, lat_avg, lat_min, lat_max in rows:
-                ct = CHECK_TYPE_REV.get(ct_int, "tcp")
-                out[ct] = {
-                    "success": int(success or 0),
-                    "fail": int(total - (success or 0)),
-                    "total": int(total),
-                    "lat_avg": _round(lat_avg),
-                    "lat_min": _round(lat_min),
-                    "lat_max": _round(lat_max),
-                }
-            return out
+        total_stats: Dict[str, Dict] = {}
+        for ct_int, success, total in total_rows:
+            ct = CHECK_TYPE_REV.get(ct_int, "tcp")
+            total_stats[ct] = {"success": int(success or 0), "fail": int(total - (success or 0)), "total": int(total)}
 
-        # one entry per check_type (most recent)
+        window_stats: Dict[str, Dict] = {}
+        for ct_int, success, total, lat_avg, lat_min, lat_max in window_rows:
+            ct = CHECK_TYPE_REV.get(ct_int, "tcp")
+            window_stats[ct] = {
+                "success": int(success or 0), "fail": int(total - (success or 0)), "total": int(total),
+                "lat_avg": _round(lat_avg), "lat_min": _round(lat_min), "lat_max": _round(lat_max),
+            }
+
         last_checks: Dict[str, Dict] = {}
         for row in last_rows:
             ct = CHECK_TYPE_REV.get(row[0], "tcp")
-            if ct not in last_checks:
-                last_checks[ct] = {
-                    "success": bool(row[1]),
-                    "latency_ms": row[2],
-                    "external_ip": row[3],
-                    "error": row[4],
-                    "timestamp": row[5],
-                }
+            last_checks[ct] = {
+                "success": bool(row[1]), "latency_ms": row[2], "external_ip": row[3], "error": row[4], "timestamp": row[5],
+            }
 
         sparkline: Dict[str, List[Dict]] = {}
         for row in sparkline_rows:
             ct = CHECK_TYPE_REV.get(row[0], "tcp")
-            sparkline.setdefault(ct, []).append(
-                {
-                    "ts": row[1],
-                    "success": int(row[2] or 0),
-                    "fail": int(row[3] or 0),
-                    "avg_latency": row[4],
-                }
-            )
+            sparkline.setdefault(ct, []).append({
+                "ts": row[1], "success": int(row[2] or 0), "fail": int(row[3] or 0), "avg_latency": row[4],
+            })
 
-        return {
-            "total": _agg_simple(total_rows),
-            "window": _agg_window(window_rows),
-            "last_checks": last_checks,
-            "sparkline": sparkline,
-        }
+        return {"total": total_stats, "window": window_stats, "last_checks": last_checks, "sparkline": sparkline}
 
     # ------------------------------------------------------------------ #
     #  Read – chart data (detail modal)                                    #

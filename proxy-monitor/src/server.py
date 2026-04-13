@@ -193,12 +193,31 @@ async def _require_auth(request: Request) -> None:
 async def _run_checks() -> None:
     await asyncio.sleep(1)  # brief pause to let uvicorn settle
     while True:
-        interval = config.get("monitoring", {}).get("check_interval_seconds", 60)
+        cycle_start = time.monotonic()
+        
+        mon_cfg = config.get("monitoring", {})
+        interval = mon_cfg.get("check_interval_seconds", 60)
         proxies: List[Dict] = config.get("proxies", [])
-        concurrent = config.get("monitoring", {}).get("concurrent_checks", 10)
-        sem = asyncio.Semaphore(concurrent)
+        concurrent = mon_cfg.get("concurrent_checks", 10)
+        stagger = mon_cfg.get("stagger", True)  # Enabled by default if added to logic
+        
+        if not proxies:
+            await asyncio.sleep(interval)
+            continue
 
-        async def _check_one(proxy: Dict) -> None:
+        sem = asyncio.Semaphore(concurrent)
+        
+        # Calculate stagger delay to spread checks over the interval
+        # We aim to finish starting all checks by 80% of the interval
+        stagger_delay = 0.0
+        if stagger and len(proxies) > 1:
+            total_spread = interval * 0.8
+            stagger_delay = total_spread / len(proxies)
+
+        async def _check_one(proxy: Dict, delay: float) -> None:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            
             async with sem:
                 pid = proxy_id(proxy)
                 try:
@@ -223,15 +242,24 @@ async def _run_checks() -> None:
                     logger.error("Unhandled error checking %s: %s", proxy.get("name", pid), exc)
 
         try:
-            await asyncio.gather(*[_check_one(p) for p in proxies], return_exceptions=True)
+            # Plan checks with incremental delays
+            tasks = []
+            for i, p in enumerate(proxies):
+                tasks.append(_check_one(p, i * stagger_delay))
+            
+            await asyncio.gather(*tasks, return_exceptions=True)
             await _broadcast_stats()
         except asyncio.CancelledError:
             return
         except Exception as exc:
             logger.error("Check loop error: %s", exc)
 
+        # Calculate time to sleep until the next interval starts
+        elapsed = time.monotonic() - cycle_start
+        sleep_time = max(0.1, interval - elapsed)
+        
         try:
-            await asyncio.sleep(interval)
+            await asyncio.sleep(sleep_time)
         except asyncio.CancelledError:
             return
 
@@ -262,9 +290,12 @@ async def _all_stats() -> Dict[str, Any]:
     partial_count = 0
     dead_count = 0
 
+    # Batch fetch all summaries in 4 bulk queries instead of N*4 queries
+    all_summaries = await storage.get_all_summaries(window)  # type: ignore[union-attr]
+
     for proxy in proxies:
         pid = proxy_id(proxy)
-        summary = await storage.get_proxy_summary(pid, window)  # type: ignore[union-attr]
+        summary = all_summaries.get(pid, {})
 
         last_checks: Dict = summary.get("last_checks", {})
         is_alive = False
