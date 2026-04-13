@@ -136,7 +136,8 @@
   display: grid;
   grid-template-columns: auto auto;
   align-items: center;
-  gap: 5px;
+  column-gap: 0;
+  row-gap: 4px;
   flex-shrink: 0;
   padding-top: 1px;
 }
@@ -152,6 +153,8 @@
   color: var(--text3);
   letter-spacing: 0.5px;
   justify-self: end;
+  padding-right: 6px;
+  cursor: pointer;
 }
 
 .tags {

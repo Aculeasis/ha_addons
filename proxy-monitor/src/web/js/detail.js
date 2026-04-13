@@ -33,8 +33,8 @@ function buildDetailInfoHtml(proxy) {
   const primaryLc = lc[state.detailCheckType] || lc.tcp || lc.udp;
   const lat = primaryLc?.latency_ms;
   const ipStr = proxy.external_ip || '—';
-  const tcpTotal = tot.tcp ? `${tot.tcp.success}/${tot.tcp.total}` : '—';
-  const udpTotal = tot.udp ? `${tot.udp.success}/${tot.udp.total}` : '—';
+  const tcpTotal = tot.tcp ? `${tot.tcp.success}/${tot.tcp.total} (${successRate(tot.tcp)}%)` : '—';
+  const udpTotal = tot.udp ? `${tot.udp.success}/${tot.udp.total} (${successRate(tot.udp)}%)` : '—';
   const checks = proxy.tcp_check && proxy.udp_check ? 'TCP + UDP' : proxy.tcp_check ? 'TCP' : 'UDP';
 
   return `

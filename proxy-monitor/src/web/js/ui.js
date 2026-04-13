@@ -90,11 +90,20 @@ const _latTip = (() => {
   const el = document.createElement('div');
   el.id = 'lat-tip';
   Object.assign(el.style, {
-    position: 'fixed', zIndex: 9999, pointerEvents: 'none', display: 'none',
+    position: 'fixed', zIndex: 9999, pointerEvents: 'auto', display: 'none',
     background: 'rgba(8,8,20,0.97)', border: '1px solid rgba(91,138,245,0.35)',
     borderRadius: '10px', padding: '12px 16px', font: "12px 'Inter',sans-serif",
     color: '#e8e8f5', boxShadow: '0 12px 40px rgba(0,0,0,0.6)', minWidth: '190px',
+    cursor: 'pointer', userSelect: 'none'
   });
+  // Use capture to ensure we catch the click before it bubbles or gets lost
+  const closeTip = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    hideLatTip();
+  };
+  el.addEventListener('click', closeTip, true);
+  el.addEventListener('touchend', closeTip, true);
   document.body.appendChild(el);
   return el;
 })();
@@ -134,6 +143,13 @@ function _positionTip(e) {
   _latTip.style.left = x + 'px';
   _latTip.style.top = y + 'px';
 }
+
+// Add global listener to close tooltip on mobile/click-away
+window.addEventListener('click', (e) => {
+  if (_latTip.style.display === 'block' && !e.target.closest('.lat-entry') && !e.target.closest('#lat-tip')) {
+    hideLatTip();
+  }
+}, true);
 
 function latencyClass(ms) {
   if (!ms) return 'lat-none';
@@ -204,7 +220,7 @@ function renderStatBlock(label, stats, windowStats) {
     <div class="stat-body">
       <div class="stat-bar-bg"><div class="stat-bar ${rate > 50 ? 'bar-alive' : 'bar-dead'}" style="width:${rate}%"></div></div>
       <div class="stat-nums">
-        <span><span class="s">✓ ${stats.success}</span> / <span class="f">✕ ${stats.fail}</span> (all)</span>
+        <span><span class="s">✓ ${stats.success}</span> / <span class="f">✕ ${stats.fail}</span> (${rate}%)</span>
         <span class="s">${windowStats ? `${windowStats.success}/${windowStats.total} recent` : ''}</span>
       </div>
     </div>
@@ -238,13 +254,18 @@ function updateCard(el, proxy) {
   function latBadgeHtml(label, lat, winStats) {
     const w = winStats || {};
     const color = label === 'TCP' ? 'var(--accent)' : (label === 'UDP' ? 'var(--accent2)' : 'var(--text3)');
+    const show = "event.stopPropagation(); showLatTip(this.parentElement.querySelector('.stat-latency'), event)";
+    const hover = "showLatTip(this.parentElement.querySelector('.stat-latency'), event)";
     return `<div class="lat-entry">
-      <span class="lat-label" style="color:${color}">${label}</span>
+      <span class="lat-label" style="color:${color};cursor:pointer"
+            onmouseenter="${hover}" onmouseleave="hideLatTip()"
+            onclick="${show}">${label}</span>
       <span class="stat-latency ${latencyClass(lat)}"
             onmouseenter="showLatTip(this,event)" onmouseleave="hideLatTip()"
+            onclick="${show}"
             data-last="${lat ?? ''}" data-avg="${w.lat_avg ?? ''}"
             data-min="${w.lat_min ?? ''}" data-max="${w.lat_max ?? ''}"
-            data-label="${label}" style="cursor:default">${fmtLatency(lat)}</span>
+            data-label="${label}" style="cursor:pointer">${fmtLatency(lat)}</span>
     </div>`;
   }
   const latEntries = [];
