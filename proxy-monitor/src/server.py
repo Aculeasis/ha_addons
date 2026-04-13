@@ -502,6 +502,19 @@ async def api_db_size(_: None = Depends(_require_auth)) -> Dict:
     return {"size": size_bytes, "formatted": formatted}
 
 
+@app.post("/api/db-vacuum")
+async def api_db_vacuum(_: None = Depends(_require_auth)) -> Dict:
+    try:
+        if storage:
+            await storage.vacuum()
+            return {"status": "ok", "message": "Database optimized successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Storage not initialized")
+    except Exception as exc:
+        logger.error("Vacuum error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/api/config")
 async def api_save_config(
     request: Request,

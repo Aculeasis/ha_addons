@@ -328,3 +328,8 @@ class Storage:
                 deleted, retention_days
             )
         return deleted
+
+    async def vacuum(self) -> None:
+        async with aiosqlite.connect(self.db_path, isolation_level=None) as db:
+            await db.execute("VACUUM")
+        logger.warning("Database optimized (VACUUM)")

@@ -155,7 +155,10 @@ function buildSettingsHtml(cfg) {
       <div class="form-group">
         <label style="display:flex; justify-content:space-between; align-items:center;">
           <span>DB path</span>
-          ${state.dbSizeFormatted ? `<span style="font-size:11px; opacity:0.6; font-weight:normal;">${state.dbSizeFormatted}</span>` : ''}
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${state.dbSizeFormatted ? `<span style="font-size:11px; opacity:0.6; font-weight:normal;">${state.dbSizeFormatted}</span>` : ''}
+            <button class="btn btn-ghost btn-xs" onclick="optimizeDb(this)" title="Reclaim unused space and optimize performance">Optimize Now</button>
+          </div>
         </label>
         <input type="text" id="cfg-db-path" value="${esc(st.db_path || 'proxy_data.db')}" ${state.safeguard ? 'disabled' : ''} />
       </div>
@@ -202,6 +205,35 @@ async function saveSettings() {
     toast('success', 'Settings saved, monitoring restarted');
     closeSettings();
     state.pendingConfig = null;
+  }
+}
+
+
+async function optimizeDb(btn) {
+  if (btn.disabled) return;
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner btn-xs" style="width:10px;height:10px;border-width:2px"></div>';
+  
+  try {
+    const res = await apiFetch('api/db-vacuum', 'POST');
+    if (res) {
+      toast('success', 'Database optimized successfully');
+      // Refresh size
+      const dbInfo = await apiFetch('api/db-size');
+      if (dbInfo?.formatted) {
+        state.dbSizeFormatted = dbInfo.formatted;
+        // Find the sibling span and update it
+        const label = btn.closest('label');
+        const span = label?.querySelector('span:nth-child(2)');
+        if (span) span.textContent = dbInfo.formatted;
+      }
+    }
+  } catch (err) {
+    toast('error', 'Optimization failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
   }
 }
 

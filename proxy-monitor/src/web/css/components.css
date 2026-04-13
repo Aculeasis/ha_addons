@@ -51,6 +51,12 @@
   border-radius: var(--radius-xs);
 }
 
+.btn-xs {
+  padding: 2px 6px;
+  font-size: 10px;
+  border-radius: 4px;
+}
+
 .btn-icon {
   width: 32px;
   height: 32px;
@@ -219,6 +225,10 @@
   border-top-color: var(--accent);
   animation: spin 0.7s linear infinite;
   display: inline-block;
+}
+
+.spinner.btn-xs {
+  border-width: 1.5px;
 }
 
 @keyframes spin {
