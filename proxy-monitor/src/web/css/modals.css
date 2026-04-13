@@ -53,11 +53,6 @@
   margin-bottom: 16px;
 }
 
-.chart-controls label {
-  font-size: 12px;
-  color: var(--text2);
-  margin-right: 4px;
-}
 
 .ctrl-group {
   display: flex;

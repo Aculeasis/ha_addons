@@ -58,7 +58,7 @@ function renderGrid() {
     if (existing.has(proxy.id)) {
       updateCard(existing.get(proxy.id), proxy);
     } else {
-      const card = buildCard(proxy, idx);
+      const card = buildCard(proxy);
       grid.appendChild(card);
     }
   });
