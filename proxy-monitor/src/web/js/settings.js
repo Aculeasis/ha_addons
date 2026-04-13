@@ -292,13 +292,31 @@ function editProxy(index) {
       <button class="btn btn-ghost btn-sm" onclick="cancelProxyEdit()">Cancel</button>
     </div>
   </div>`;
+
+  // Attach input listeners to clear invalid state
+  container.querySelectorAll('input').forEach(input => {
+    input.addEventListener('input', () => input.classList.remove('invalid'));
+  });
 }
 
 function saveProxy() {
-  const name = document.getElementById('pe-name').value.trim();
-  const host = document.getElementById('pe-host').value.trim();
-  const port = parseInt(document.getElementById('pe-port').value);
-  if (!name || !host || isNaN(port)) { toast('error', 'Name, host and port are required'); return; }
+  const nameEl = document.getElementById('pe-name');
+  const hostEl = document.getElementById('pe-host');
+  const portEl = document.getElementById('pe-port');
+
+  const name = nameEl.value.trim();
+  const host = hostEl.value.trim();
+  const port = parseInt(portEl.value);
+
+  let hasError = false;
+  if (!name) { nameEl.classList.add('invalid'); hasError = true; }
+  if (!host) { hostEl.classList.add('invalid'); hasError = true; }
+  if (isNaN(port)) { portEl.classList.add('invalid'); hasError = true; }
+
+  if (hasError) {
+    toast('error', 'Please fill in all required fields');
+    return;
+  }
 
   const proxy = {
     name,

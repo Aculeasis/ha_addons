@@ -163,6 +163,12 @@
   border-color: var(--accent);
 }
 
+.form-group input.invalid,
+.form-group select.invalid {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 2px rgba(245, 74, 74, 0.15);
+}
+
 .form-group input[type="checkbox"] {
   width: 16px;
   height: 16px;

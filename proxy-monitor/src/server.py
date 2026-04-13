@@ -621,6 +621,7 @@ async def api_save_config(
         except asyncio.CancelledError:
             pass
     check_task = asyncio.create_task(_run_checks())
+    await _broadcast_stats()
 
     return {"status": "ok", "message": "Config saved, monitoring restarted"}
 
