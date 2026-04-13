@@ -44,7 +44,8 @@ function buildSettingsHtml(cfg) {
       <button class="btn btn-ghost btn-sm" onclick="editProxy(${i})">Edit</button>
       <button class="btn btn-danger btn-sm" onclick="deleteProxy(${i})">✕</button>
     </div>
-  </div>`).join('');
+  </div>
+  <div id="proxy-edit-container-${i}"></div>`).join('');
 
   return `
   <div class="settings-section">
@@ -53,7 +54,7 @@ function buildSettingsHtml(cfg) {
       Proxies
     </h3>
     <div class="proxy-list" id="proxy-list">${proxyItems}</div>
-    <div id="proxy-edit-container" style="margin-top:12px"></div>
+    <div id="proxy-edit-container-new" style="margin-top:12px"></div>
     <button class="btn btn-ghost btn-sm" style="margin-top:12px" onclick="editProxy(null)">+ Add Proxy</button>
   </div>
 
@@ -207,11 +208,13 @@ async function saveSettings() {
 
 // ─── Proxy edit form ──────────────────────────────────────────────
 function editProxy(index) {
+  cancelProxyEdit();
   state.editingProxyIndex = index;
   const proxies = state.pendingConfig?.proxies || [];
   const p = index !== null ? proxies[index] : null;
 
-  const container = document.getElementById('proxy-edit-container');
+  const containerId = index !== null ? `proxy-edit-container-${index}` : 'proxy-edit-container-new';
+  const container = document.getElementById(containerId);
   if (!container) return;
 
   container.innerHTML = `
@@ -288,24 +291,23 @@ function saveProxy() {
   // Re-render settings
   const body = document.getElementById('settings-body');
   if (body) body.innerHTML = buildSettingsHtml(state.pendingConfig);
-  document.getElementById('proxy-edit-container').innerHTML = '';
   toast('info', `Proxy "${name}" ${state.editingProxyIndex !== null ? 'updated' : 'added'} (save to apply)`);
   state.editingProxyIndex = null;
 }
 
 function cancelProxyEdit() {
-  const c = document.getElementById('proxy-edit-container');
-  if (c) c.innerHTML = '';
+  document.querySelectorAll('[id^="proxy-edit-container-"]').forEach(c => c.innerHTML = '');
   state.editingProxyIndex = null;
 }
 
 function deleteProxy(index) {
   if (!state.pendingConfig) return;
+  cancelProxyEdit();
   state.editingProxyIndex = index;
   const p = state.pendingConfig.proxies[index];
   if (!p) return;
 
-  const container = document.getElementById('proxy-edit-container');
+  const container = document.getElementById(`proxy-edit-container-${index}`);
   if (!container) return;
 
   container.innerHTML = `
