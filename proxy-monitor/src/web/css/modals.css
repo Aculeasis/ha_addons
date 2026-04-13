@@ -185,7 +185,7 @@
 .proxy-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   margin-top: 12px;
 }
 
@@ -196,16 +196,36 @@
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: var(--radius-xs);
-  padding: 12px 14px;
+  padding: 10px 14px;
+  transition: border-color var(--t);
+}
+
+.proxy-item:hover {
+  border-color: var(--border-accent);
 }
 
 .proxy-item-info {
   flex: 1;
+  min-width: 0;
+}
+
+.proxy-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap; /* allows tags to wrap if name is long */
 }
 
 .proxy-item-name {
   font-weight: 600;
   font-size: 13px;
+  color: var(--text);
+}
+
+.proxy-item-tags {
+  display: flex;
+  gap: 4px;
+  align-items: center;
 }
 
 .proxy-item-addr {
@@ -213,16 +233,32 @@
   color: var(--text3);
   font-family: monospace;
   word-break: break-all;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .proxy-item-actions {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .proxy-item {
+    padding: 10px;
+    gap: 8px;
+  }
+  
+  .proxy-item-name {
+    font-size: 12px;
+  }
+  
+  .proxy-item-addr {
+    font-size: 11px;
+  }
+
+  .proxy-item-actions .btn {
+    padding: 4px 8px;
+  }
 }
 
 /* proxy edit mini-form */

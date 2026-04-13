@@ -34,11 +34,14 @@ function buildSettingsHtml(cfg) {
   const proxyItems = proxies.map((p, i) => `
   <div class="proxy-item" id="proxy-item-${i}">
     <div class="proxy-item-info">
-      <div class="proxy-item-name">${esc(p.name)}</div>
-      <div class="proxy-item-addr">${esc(p.host)}:${p.port}
-        ${p.tcp_check !== false ? '<span class="tag">TCP</span>' : ''}
-        ${p.udp_check ? '<span class="tag">UDP</span>' : ''}
+      <div class="proxy-item-head">
+        <div class="proxy-item-name">${esc(p.name)}</div>
+        <div class="proxy-item-tags">
+          ${p.tcp_check !== false ? '<span class="tag">TCP</span>' : ''}
+          ${p.udp_check ? '<span class="tag">UDP</span>' : ''}
+        </div>
       </div>
+      <div class="proxy-item-addr">${esc(p.host)}:${p.port}</div>
     </div>
     <div class="proxy-item-actions">
       <button class="btn btn-ghost btn-sm" onclick="editProxy(${i})">Edit</button>
@@ -156,7 +159,7 @@ function buildSettingsHtml(cfg) {
         <label style="display:flex; justify-content:space-between; align-items:center;">
           <span>DB path</span>
           <div style="display:flex; align-items:center; gap:8px;">
-            ${state.dbSizeFormatted ? `<span style="font-size:11px; opacity:0.6; font-weight:normal;">${state.dbSizeFormatted}</span>` : ''}
+            <span id="db-size-display" style="font-size:11px; opacity:0.6; font-weight:normal;">${state.dbSizeFormatted || ''}</span>
             <button class="btn btn-ghost btn-xs" onclick="optimizeDb(this)" title="Reclaim unused space and optimize performance">Optimize Now</button>
           </div>
         </label>
@@ -223,9 +226,7 @@ async function optimizeDb(btn) {
       const dbInfo = await apiFetch('api/db-size');
       if (dbInfo?.formatted) {
         state.dbSizeFormatted = dbInfo.formatted;
-        // Find the sibling span and update it
-        const label = btn.closest('label');
-        const span = label?.querySelector('span:nth-child(2)');
+        const span = document.getElementById('db-size-display');
         if (span) span.textContent = dbInfo.formatted;
       }
     }

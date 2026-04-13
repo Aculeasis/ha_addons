@@ -7,7 +7,7 @@ function toast(type, text, ms = 3500) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.innerHTML = `<span class="toast-icon">${ICONS[type] || '•'}</span><span>${esc(text)}</span>`;
-  tc.appendChild(el);
+  tc.prepend(el);
   setTimeout(() => {
     el.classList.add('toast-fade');
     el.addEventListener('animationend', () => el.remove(), { once: true });
