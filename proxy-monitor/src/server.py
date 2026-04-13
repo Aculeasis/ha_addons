@@ -89,6 +89,7 @@ checker: Optional[ProxyChecker] = None
 ws_clients: Set[WebSocket] = set()
 check_task: Optional[asyncio.Task] = None
 cleanup_task: Optional[asyncio.Task] = None
+session_cleanup_task: Optional[asyncio.Task] = None
 
 # token -> expiry (unix timestamp)
 sessions: Dict[str, float] = {}
@@ -100,14 +101,14 @@ WEB_DIR = Path(__file__).parent / "web"
 class MonitoringSettings:
     """Cached monitoring settings to avoid repeated dict lookups in the check loop."""
     __slots__ = ('interval', 'timeout', 'concurrent', 'stagger', 'window_minutes')
-    
+
     def __init__(self):
         self.interval: int = 60
         self.timeout: float = 10.0
         self.concurrent: int = 10
         self.stagger: bool = True
         self.window_minutes: int = 5
-    
+
     def update(self, cfg: Dict[str, Any]) -> None:
         mon = cfg.get("monitoring", {})
         self.interval = mon.get("check_interval_seconds", 60)
@@ -217,19 +218,19 @@ async def _run_checks() -> None:
     await asyncio.sleep(1)  # brief pause to let uvicorn settle
     while True:
         cycle_start = time.monotonic()
-        
+
         # Use cached settings instead of repeated dict lookups
         interval = mon_settings.interval
         concurrent = mon_settings.concurrent
         stagger = mon_settings.stagger
         proxies: List[Dict] = config.get("proxies", [])
-        
+
         if not proxies:
             await asyncio.sleep(interval)
             continue
 
         sem = asyncio.Semaphore(concurrent)
-        
+
         # Calculate stagger delay to spread checks over the interval
         # We aim to finish starting all checks by 80% of the interval
         stagger_delay = 0.0
@@ -240,7 +241,7 @@ async def _run_checks() -> None:
         async def _check_one(proxy: Dict, delay: float) -> None:
             if delay > 0:
                 await asyncio.sleep(delay)
-            
+
             async with sem:
                 pid = proxy_id(proxy)
                 try:
@@ -269,7 +270,7 @@ async def _run_checks() -> None:
             tasks = []
             for i, p in enumerate(proxies):
                 tasks.append(_check_one(p, i * stagger_delay))
-            
+
             await asyncio.gather(*tasks, return_exceptions=True)
             await _broadcast_stats()
         except asyncio.CancelledError:
@@ -280,7 +281,7 @@ async def _run_checks() -> None:
         # Calculate time to sleep until the next interval starts
         elapsed = time.monotonic() - cycle_start
         sleep_time = max(0.1, interval - elapsed)
-        
+
         try:
             await asyncio.sleep(sleep_time)
         except asyncio.CancelledError:
@@ -299,6 +300,24 @@ async def _run_cleanup() -> None:
             await storage.cleanup_old_data(retention)  # type: ignore[union-attr]
         except Exception as exc:
             logger.error("Cleanup error: %s", exc)
+
+
+async def _run_session_cleanup() -> None:
+    """Periodically clean up expired sessions to prevent memory leaks."""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Run every hour
+        except asyncio.CancelledError:
+            return
+        try:
+            now = time.time()
+            expired = [token for token, expiry in sessions.items() if expiry < now]
+            for token in expired:
+                sessions.pop(token, None)
+            if expired:
+                logger.info("Cleaned up %d expired session(s)", len(expired))
+        except Exception as exc:
+            logger.error("Session cleanup error: %s", exc)
 
 
 # ------------------------------------------------------------------ #
@@ -402,7 +421,7 @@ async def _broadcast_stats() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global config, storage, checker, check_task, cleanup_task
+    global config, storage, checker, check_task, cleanup_task, session_cleanup_task
 
     config = load_config()
     apply_logging_level()
@@ -414,6 +433,7 @@ async def lifespan(app: FastAPI):
 
     check_task = asyncio.create_task(_run_checks())
     cleanup_task = asyncio.create_task(_run_cleanup())
+    session_cleanup_task = asyncio.create_task(_run_session_cleanup())
 
     n = len(config.get("proxies", []))
     logger.warning("Proxy Monitor started - %d prox%s configured.", n, "ies" if n != 1 else "y")
@@ -421,18 +441,18 @@ async def lifespan(app: FastAPI):
     yield
 
     # Graceful shutdown
-    for task in (check_task, cleanup_task):
+    for task in (check_task, cleanup_task, session_cleanup_task):
         if task and not task.done():
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-    
+
     # Close checker sessions
     if checker:
         await checker.close()
-    
+
     # Close database connection
     if storage:
         await storage.close()
@@ -618,8 +638,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.close(code=4403, reason="Forbidden")
         return
 
-    # Auth check
-    client_ip = websocket.client.host if websocket.client else ""
     needs_auth = _auth_required() and not _is_trusted_ip(client_ip)
 
     try:
@@ -629,7 +647,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         if msg.get("type") != "auth":
             await websocket.close(code=4401, reason="Unauthorized")
             return
-        
+
         token = msg.get("token", "")
         if needs_auth and not _validate_session(token):
             await websocket.close(code=4401, reason="Unauthorized")
@@ -676,7 +694,7 @@ async def serve_static(path: str) -> FileResponse:
         # Resolve path to handle '..' and ensure it's absolute
         # We lstrip to prevent Path from treating it as an absolute path when joining
         fp = (root / path.lstrip("/\\")).resolve()
-        
+
         # Check if the file is within WEB_DIR and exists
         if fp.is_file() and fp.is_relative_to(root):
             return FileResponse(fp)
