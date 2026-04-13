@@ -22,14 +22,45 @@ logger = logging.getLogger(__name__)
 class ProxyChecker:
     def __init__(self, config: Dict) -> None:
         self.config = config
+        self._tcp_test_url: Optional[str] = None
+        self._timeout: Optional[float] = None
+        self._connector: Optional[aiohttp.TCPConnector] = None
+
+    async def _get_connector(self) -> aiohttp.TCPConnector:
+        """Get or create a shared TCP connector for connection pooling."""
+        if self._connector is None or self._connector.closed:
+            self._connector = aiohttp.TCPConnector(
+                limit=100,  # Total connection pool size
+                limit_per_host=10,  # Per-host limit
+                ttl_dns_cache=300,  # DNS cache TTL
+                enable_cleanup_closed=True,
+            )
+        return self._connector
+
+    async def close(self) -> None:
+        """Close the connector and cleanup resources."""
+        if self._connector and not self._connector.closed:
+            await self._connector.close()
+            self._connector = None
 
     # ------------------------------------------------------------------ #
-    #  Helpers                                                             #
+    #  Helpers (cached)                                                    #
     # ------------------------------------------------------------------ #
-    def _timeout(self) -> float:
-        return float(
-            self.config.get("monitoring", {}).get("check_timeout_seconds", 10)
-        )
+    def _get_timeout(self) -> float:
+        """Get timeout with caching to avoid repeated dict lookups."""
+        if self._timeout is None:
+            self._timeout = float(
+                self.config.get("monitoring", {}).get("check_timeout_seconds", 10)
+            )
+        return self._timeout
+
+    def _get_tcp_test_url(self) -> str:
+        """Get TCP test URL with caching."""
+        if self._tcp_test_url is None:
+            self._tcp_test_url = self.config.get("monitoring", {}).get(
+                "tcp_test_url", "http://httpbin.org/ip"
+            )
+        return self._tcp_test_url
 
     def _proxy_url(self, proxy: Dict) -> str:
         host = proxy["host"]
@@ -44,12 +75,13 @@ class ProxyChecker:
     #  TCP check                                                           #
     # ------------------------------------------------------------------ #
     async def check_tcp(self, proxy: Dict) -> Dict[str, Any]:
-        timeout = self._timeout()
-        test_url: str = self.config.get("monitoring", {}).get(
-            "tcp_test_url", "http://httpbin.org/ip"
-        )
+        """Check TCP connectivity through the SOCKS5 proxy."""
+        timeout = self._get_timeout()
+        test_url = self._get_tcp_test_url()
         start = time.monotonic()
         try:
+            # Use ProxyConnector for SOCKS5 support
+            # Note: Each proxy needs its own connector due to different endpoints
             connector = ProxyConnector.from_url(self._proxy_url(proxy))
             async with aiohttp.ClientSession(
                 connector=connector,
@@ -101,11 +133,12 @@ class ProxyChecker:
     #  UDP check (SOCKS5 UDP ASSOCIATE + DNS query)                       #
     # ------------------------------------------------------------------ #
     async def check_udp(self, proxy: Dict) -> Dict[str, Any]:
+        """Check UDP connectivity through the SOCKS5 proxy via DNS query."""
         host = proxy["host"]
         port = proxy["port"]
         user = proxy.get("username", "") or ""
         pwd = proxy.get("password", "") or ""
-        timeout = self._timeout()
+        timeout = self._get_timeout()
         start = time.monotonic()
         reader: Optional[asyncio.StreamReader] = None
         writer: Optional[asyncio.StreamWriter] = None

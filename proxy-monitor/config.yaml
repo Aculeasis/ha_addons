@@ -13,6 +13,7 @@ init: false
 ingress: true
 ingress_stream: true
 apparmor: true
+backup: "cold"
 map:
   - type: addon_config
     read_only: false

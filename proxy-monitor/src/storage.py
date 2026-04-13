@@ -17,61 +17,77 @@ class Storage:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
         self._proxy_cache: Dict[str, int] = {}
+        self._db: Optional[aiosqlite.Connection] = None
 
     # ------------------------------------------------------------------ #
-    #  Init                                                                #
+    #  Init / Close                                                        #
     # ------------------------------------------------------------------ #
     async def init(self) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
-            cur = await db.execute("PRAGMA table_info(proxy_checks)")
-            cols = [row[1] for row in await cur.fetchall()]
-            if cols and "external_ip" in cols:
-                logger.warning("Outdated schema detected. Dropping old proxy_checks table...")
-                await db.execute("DROP TABLE proxy_checks")
-                await db.commit()
+        """Initialize database connection and create tables if needed."""
+        self._db = await aiosqlite.connect(self.db_path)
+        
+        # Enable WAL mode for better concurrent read/write performance
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA synchronous=NORMAL")
+        
+        cur = await self._db.execute("PRAGMA table_info(proxy_checks)")
+        cols = [row[1] for row in await cur.fetchall()]
+        if cols and "external_ip" in cols:
+            logger.warning("Outdated schema detected. Dropping old proxy_checks table...")
+            await self._db.execute("DROP TABLE proxy_checks")
+            await self._db.commit()
 
-            await db.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS proxies (
-                    id INTEGER PRIMARY KEY,
-                    proxy_id TEXT UNIQUE NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS proxy_checks (
-                    proxy_fk    INTEGER NOT NULL,
-                    check_type  INTEGER NOT NULL,
-                    timestamp   INTEGER NOT NULL,
-                    success     INTEGER NOT NULL,
-                    latency_ms  REAL
-                );
-                CREATE TABLE IF NOT EXISTS proxy_state (
-                    proxy_fk    INTEGER NOT NULL,
-                    check_type  INTEGER NOT NULL,
-                    timestamp   INTEGER NOT NULL,
-                    success     INTEGER NOT NULL,
-                    latency_ms  REAL,
-                    external_ip TEXT,
-                    error       TEXT,
-                    PRIMARY KEY (proxy_fk, check_type)
-                );
-                CREATE INDEX IF NOT EXISTS idx_proxy_ct_ts
-                    ON proxy_checks(proxy_fk, check_type, timestamp DESC);
-                CREATE INDEX IF NOT EXISTS idx_ts
-                    ON proxy_checks(timestamp);
-                """
-            )
-            await db.commit()
-            
-            cur = await db.execute("SELECT id, proxy_id FROM proxies")
-            for pid, p_str in await cur.fetchall():
-                self._proxy_cache[p_str] = pid
+        await self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS proxies (
+                id INTEGER PRIMARY KEY,
+                proxy_id TEXT UNIQUE NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS proxy_checks (
+                proxy_fk    INTEGER NOT NULL,
+                check_type  INTEGER NOT NULL,
+                timestamp   INTEGER NOT NULL,
+                success     INTEGER NOT NULL,
+                latency_ms  REAL
+            );
+            CREATE TABLE IF NOT EXISTS proxy_state (
+                proxy_fk    INTEGER NOT NULL,
+                check_type  INTEGER NOT NULL,
+                timestamp   INTEGER NOT NULL,
+                success     INTEGER NOT NULL,
+                latency_ms  REAL,
+                external_ip TEXT,
+                error       TEXT,
+                PRIMARY KEY (proxy_fk, check_type)
+            );
+            CREATE INDEX IF NOT EXISTS idx_proxy_ct_ts
+                ON proxy_checks(proxy_fk, check_type, timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_ts
+                ON proxy_checks(timestamp);
+            """
+        )
+        await self._db.commit()
+        
+        cur = await self._db.execute("SELECT id, proxy_id FROM proxies")
+        for pid, p_str in await cur.fetchall():
+            self._proxy_cache[p_str] = pid
         logger.warning("Storage initialised: %s", self.db_path)
 
-    async def _get_proxy_fk(self, db: aiosqlite.Connection, proxy_id: str) -> int:
+    async def close(self) -> None:
+        """Close the database connection."""
+        if self._db:
+            await self._db.close()
+            self._db = None
+
+    async def _get_proxy_fk(self, proxy_id: str) -> int:
+        """Get or create proxy foreign key using the cached connection."""
         if proxy_id in self._proxy_cache:
             return self._proxy_cache[proxy_id]
-        await db.execute("INSERT OR IGNORE INTO proxies (proxy_id) VALUES (?)", (proxy_id,))
-        await db.commit()
-        cur = await db.execute("SELECT id FROM proxies WHERE proxy_id = ?", (proxy_id,))
+        if not self._db:
+            raise RuntimeError("Database not initialized")
+        await self._db.execute("INSERT OR IGNORE INTO proxies (proxy_id) VALUES (?)", (proxy_id,))
+        await self._db.commit()
+        cur = await self._db.execute("SELECT id FROM proxies WHERE proxy_id = ?", (proxy_id,))
         row = await cur.fetchone()
         if row:
             self._proxy_cache[proxy_id] = row[0]
@@ -91,40 +107,42 @@ class Storage:
         external_ip: Optional[str] = None,
         error: Optional[str] = None,
     ) -> None:
+        """Save a check result using the persistent connection."""
+        if not self._db:
+            raise RuntimeError("Database not initialized")
         ct_int = CHECK_TYPE_MAP.get(check_type, 1)
-        async with aiosqlite.connect(self.db_path) as db:
-            proxy_fk = await self._get_proxy_fk(db, proxy_id)
-            await db.execute(
-                """
-                INSERT INTO proxy_checks
-                    (proxy_fk, check_type, timestamp, success, latency_ms)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    proxy_fk,
-                    ct_int,
-                    timestamp,
-                    1 if success else 0,
-                    latency_ms,
-                ),
-            )
-            await db.execute(
-                """
-                INSERT OR REPLACE INTO proxy_state
-                    (proxy_fk, check_type, timestamp, success, latency_ms, external_ip, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    proxy_fk,
-                    ct_int,
-                    timestamp,
-                    1 if success else 0,
-                    latency_ms,
-                    external_ip,
-                    error,
-                ),
-            )
-            await db.commit()
+        proxy_fk = await self._get_proxy_fk(proxy_id)
+        await self._db.execute(
+            """
+            INSERT INTO proxy_checks
+                (proxy_fk, check_type, timestamp, success, latency_ms)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                proxy_fk,
+                ct_int,
+                timestamp,
+                1 if success else 0,
+                latency_ms,
+            ),
+        )
+        await self._db.execute(
+            """
+            INSERT OR REPLACE INTO proxy_state
+                (proxy_fk, check_type, timestamp, success, latency_ms, external_ip, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                proxy_fk,
+                ct_int,
+                timestamp,
+                1 if success else 0,
+                latency_ms,
+                external_ip,
+                error,
+            ),
+        )
+        await self._db.commit()
 
     # ------------------------------------------------------------------ #
     #  Read – summary (used by WebSocket broadcast)                       #
@@ -133,46 +151,48 @@ class Storage:
         self, window_minutes: int = 5
     ) -> Dict[str, Dict[str, Any]]:
         """Fetch stats for ALL proxies in 4 bulk queries instead of N*4 queries."""
+        if not self._db:
+            raise RuntimeError("Database not initialized")
+        
         now = int(time.time())
         window_start = now - window_minutes * 60
         sparkline_start = now - 3600
 
-        async with aiosqlite.connect(self.db_path) as db:
-            # 1. Totals
-            async with db.execute(
-                "SELECT proxy_fk, check_type, SUM(success), COUNT(*) FROM proxy_checks GROUP BY proxy_fk, check_type"
-            ) as cur:
-                total_rows = await cur.fetchall()
+        # 1. Totals
+        async with self._db.execute(
+            "SELECT proxy_fk, check_type, SUM(success), COUNT(*) FROM proxy_checks GROUP BY proxy_fk, check_type"
+        ) as cur:
+            total_rows = await cur.fetchall()
 
-            # 2. Window stats
-            async with db.execute(
-                """
-                SELECT proxy_fk, check_type, SUM(success), COUNT(*),
-                       AVG(CASE WHEN success=1 THEN latency_ms END),
-                       MIN(CASE WHEN success=1 THEN latency_ms END),
-                       MAX(CASE WHEN success=1 THEN latency_ms END)
-                FROM proxy_checks WHERE timestamp >= ? GROUP BY proxy_fk, check_type
-                """,
-                (window_start,),
-            ) as cur:
-                window_rows = await cur.fetchall()
+        # 2. Window stats
+        async with self._db.execute(
+            """
+            SELECT proxy_fk, check_type, SUM(success), COUNT(*),
+                   AVG(CASE WHEN success=1 THEN latency_ms END),
+                   MIN(CASE WHEN success=1 THEN latency_ms END),
+                   MAX(CASE WHEN success=1 THEN latency_ms END)
+            FROM proxy_checks WHERE timestamp >= ? GROUP BY proxy_fk, check_type
+            """,
+            (window_start,),
+        ) as cur:
+            window_rows = await cur.fetchall()
 
-            # 3. Last states
-            async with db.execute(
-                "SELECT proxy_fk, check_type, success, latency_ms, external_ip, error, timestamp FROM proxy_state"
-            ) as cur:
-                last_rows = await cur.fetchall()
+        # 3. Last states
+        async with self._db.execute(
+            "SELECT proxy_fk, check_type, success, latency_ms, external_ip, error, timestamp FROM proxy_state"
+        ) as cur:
+            last_rows = await cur.fetchall()
 
-            # 4. Sparklines
-            async with db.execute(
-                """
-                SELECT proxy_fk, check_type, (timestamp / 60) * 60 AS bucket,
-                       SUM(success), COUNT(*) - SUM(success), AVG(latency_ms)
-                FROM proxy_checks WHERE timestamp >= ? GROUP BY proxy_fk, check_type, bucket ORDER BY bucket ASC
-                """,
-                (sparkline_start,),
-            ) as cur:
-                sparkline_rows = await cur.fetchall()
+        # 4. Sparklines
+        async with self._db.execute(
+            """
+            SELECT proxy_fk, check_type, (timestamp / 60) * 60 AS bucket,
+                   SUM(success), COUNT(*) - SUM(success), AVG(latency_ms)
+            FROM proxy_checks WHERE timestamp >= ? GROUP BY proxy_fk, check_type, bucket ORDER BY bucket ASC
+            """,
+            (sparkline_start,),
+        ) as cur:
+            sparkline_rows = await cur.fetchall()
 
         fk_to_id = {v: k for k, v in self._proxy_cache.items()}
         by_proxy: Dict[str, List[list]] = {pid: [[], [], [], []] for pid in self._proxy_cache}
@@ -233,29 +253,31 @@ class Storage:
         hours: int = 24,
         group_by: str = "hour",
     ) -> Dict[str, List[Dict]]:
+        if not self._db:
+            raise RuntimeError("Database not initialized")
+        
         now = int(time.time())
         from_ts = now - hours * 3600
         interval = {"minute": 60, "hour": 3600, "day": 86400}.get(group_by, 3600)
 
-        async with aiosqlite.connect(self.db_path) as db:
-            proxy_fk = await self._get_proxy_fk(db, proxy_id)
-            async with db.execute(
-                """
-                SELECT check_type,
-                       (timestamp / ?) * ?  AS bucket,
-                       SUM(success)         AS successes,
-                       COUNT(*) - SUM(success) AS failures,
-                       AVG(latency_ms)      AS avg_lat,
-                       MIN(latency_ms)      AS min_lat,
-                       MAX(latency_ms)      AS max_lat
-                FROM proxy_checks
-                WHERE proxy_fk = ? AND timestamp >= ?
-                GROUP BY check_type, bucket
-                ORDER BY bucket ASC
-                """,
-                (interval, interval, proxy_fk, from_ts),
-            ) as cur:
-                rows = await cur.fetchall()
+        proxy_fk = await self._get_proxy_fk(proxy_id)
+        async with self._db.execute(
+            """
+            SELECT check_type,
+                   (timestamp / ?) * ?  AS bucket,
+                   SUM(success)         AS successes,
+                   COUNT(*) - SUM(success) AS failures,
+                   AVG(latency_ms)      AS avg_lat,
+                   MIN(latency_ms)      AS min_lat,
+                   MAX(latency_ms)      AS max_lat
+            FROM proxy_checks
+            WHERE proxy_fk = ? AND timestamp >= ?
+            GROUP BY check_type, bucket
+            ORDER BY bucket ASC
+            """,
+            (interval, interval, proxy_fk, from_ts),
+        ) as cur:
+            rows = await cur.fetchall()
 
         result: Dict[str, List[Dict]] = {}
         for row in rows:
@@ -276,19 +298,19 @@ class Storage:
     #  Cleanup                                                             #
     # ------------------------------------------------------------------ #
     async def cleanup_old_data(self, retention_days: int) -> int:
+        if not self._db:
+            raise RuntimeError("Database not initialized")
+        
         cutoff = int(time.time()) - retention_days * 86400
-        async with aiosqlite.connect(self.db_path) as db:
-            cur = await db.execute(
-                "DELETE FROM proxy_checks WHERE timestamp < ?", (cutoff,)
-            )
-            await db.commit()
-            deleted = cur.rowcount
+        cur = await self._db.execute(
+            "DELETE FROM proxy_checks WHERE timestamp < ?", (cutoff,)
+        )
+        await self._db.commit()
+        deleted = cur.rowcount
             
         if deleted:
             # VACUUM reclaims unused disk space. It cannot run in a transaction.
-            async with aiosqlite.connect(self.db_path, isolation_level=None) as db:
-                await db.execute("VACUUM")
-                
+            await self._db.execute("VACUUM")
             logger.warning(
                 "Cleaned %d old records (retention=%dd) and vacuumed database", 
                 deleted, retention_days
@@ -296,6 +318,7 @@ class Storage:
         return deleted
 
     async def vacuum(self) -> None:
-        async with aiosqlite.connect(self.db_path, isolation_level=None) as db:
-            await db.execute("VACUUM")
+        if not self._db:
+            raise RuntimeError("Database not initialized")
+        await self._db.execute("VACUUM")
         logger.warning("Database optimized (VACUUM)")

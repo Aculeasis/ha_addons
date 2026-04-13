@@ -96,6 +96,28 @@ SESSION_TTL = 86400  # 24 h
 
 WEB_DIR = Path(__file__).parent / "web"
 
+# Cached monitoring settings (updated on config load)
+class MonitoringSettings:
+    """Cached monitoring settings to avoid repeated dict lookups in the check loop."""
+    __slots__ = ('interval', 'timeout', 'concurrent', 'stagger', 'window_minutes')
+    
+    def __init__(self):
+        self.interval: int = 60
+        self.timeout: float = 10.0
+        self.concurrent: int = 10
+        self.stagger: bool = True
+        self.window_minutes: int = 5
+    
+    def update(self, cfg: Dict[str, Any]) -> None:
+        mon = cfg.get("monitoring", {})
+        self.interval = mon.get("check_interval_seconds", 60)
+        self.timeout = float(mon.get("check_timeout_seconds", 10))
+        self.concurrent = mon.get("concurrent_checks", 10)
+        self.stagger = mon.get("stagger", True)
+        self.window_minutes = mon.get("recent_window_minutes", 5)
+
+mon_settings = MonitoringSettings()
+
 # ------------------------------------------------------------------ #
 #  Config helpers                                                      #
 # ------------------------------------------------------------------ #
@@ -191,15 +213,16 @@ async def _require_auth(request: Request) -> None:
 # ------------------------------------------------------------------ #
 
 async def _run_checks() -> None:
+    """Main check loop using cached monitoring settings."""
     await asyncio.sleep(1)  # brief pause to let uvicorn settle
     while True:
         cycle_start = time.monotonic()
         
-        mon_cfg = config.get("monitoring", {})
-        interval = mon_cfg.get("check_interval_seconds", 60)
+        # Use cached settings instead of repeated dict lookups
+        interval = mon_settings.interval
+        concurrent = mon_settings.concurrent
+        stagger = mon_settings.stagger
         proxies: List[Dict] = config.get("proxies", [])
-        concurrent = mon_cfg.get("concurrent_checks", 10)
-        stagger = mon_cfg.get("stagger", True)  # Enabled by default if added to logic
         
         if not proxies:
             await asyncio.sleep(interval)
@@ -383,6 +406,7 @@ async def lifespan(app: FastAPI):
 
     config = load_config()
     apply_logging_level()
+    mon_settings.update(config)  # Cache monitoring settings
     db_path = config.get("storage", {}).get("db_path", "proxy_data.db")
     storage = Storage(db_path)
     await storage.init()
@@ -396,6 +420,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Graceful shutdown
     for task in (check_task, cleanup_task):
         if task and not task.done():
             task.cancel()
@@ -403,6 +428,14 @@ async def lifespan(app: FastAPI):
                 await task
             except asyncio.CancelledError:
                 pass
+    
+    # Close checker sessions
+    if checker:
+        await checker.close()
+    
+    # Close database connection
+    if storage:
+        await storage.close()
 
 
 # ------------------------------------------------------------------ #
@@ -557,6 +590,7 @@ async def api_save_config(
     save_config(body)
     config = body
     apply_logging_level()
+    mon_settings.update(config)  # Update cached settings
     checker = ProxyChecker(config)
 
     # Restart check loop with new settings
