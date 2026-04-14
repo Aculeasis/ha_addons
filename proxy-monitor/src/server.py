@@ -296,8 +296,14 @@ async def _run_cleanup() -> None:
         except asyncio.CancelledError:
             return
         try:
-            retention = config.get("storage", {}).get("retention_days", 30)
-            await storage.cleanup_old_data(retention)  # type: ignore[union-attr]
+            if storage:
+                # Sync proxies: remove those that are no longer in the config
+                configured_ids = [proxy_id(p) for p in config.get("proxies", [])]
+                await storage.sync_proxies(configured_ids)
+                
+                # Cleanup old data
+                retention = config.get("storage", {}).get("retention_days", 30)
+                await storage.cleanup_old_data(retention)
         except Exception as exc:
             logger.error("Cleanup error: %s", exc)
 
@@ -590,6 +596,10 @@ async def api_db_size(_: None = Depends(_require_auth)) -> Dict:
 async def api_db_vacuum(_: None = Depends(_require_auth)) -> Dict:
     try:
         if storage:
+            # Sync proxies: remove those that are no longer in the config
+            configured_ids = [proxy_id(p) for p in config.get("proxies", [])]
+            await storage.sync_proxies(configured_ids)
+            
             await storage.vacuum()
             return {"status": "ok", "message": "Database optimized successfully"}
         else:

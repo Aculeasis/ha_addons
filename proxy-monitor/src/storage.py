@@ -320,6 +320,41 @@ class Storage:
             )
         return deleted
 
+    async def sync_proxies(self, configured_ids: List[str]) -> int:
+        """Remove proxies from database that are not in the configured_ids list."""
+        if not self._db:
+            raise RuntimeError("Database not initialized")
+        
+        # Get all proxy IDs and their FKs from the DB
+        async with self._db.execute("SELECT id, proxy_id FROM proxies") as cur:
+            db_proxies = await cur.fetchall()
+        
+        to_delete_fks = []
+        to_delete_ids = []
+        configured_set = set(configured_ids)
+        
+        for fk, pid in db_proxies:
+            if pid not in configured_set:
+                to_delete_fks.append(fk)
+                to_delete_ids.append(pid)
+        
+        if not to_delete_fks:
+            return 0
+            
+        logger.warning("Removing %d obsolete proxies from database: %s", len(to_delete_ids), to_delete_ids)
+        
+        placeholders = ",".join("?" for _ in to_delete_fks)
+        await self._db.execute(f"DELETE FROM proxy_checks WHERE proxy_fk IN ({placeholders})", to_delete_fks)
+        await self._db.execute(f"DELETE FROM proxy_state WHERE proxy_fk IN ({placeholders})", to_delete_fks)
+        await self._db.execute(f"DELETE FROM proxies WHERE id IN ({placeholders})", to_delete_fks)
+        await self._db.commit()
+        
+        # Update cache
+        for pid in to_delete_ids:
+            self._proxy_cache.pop(pid, None)
+            
+        return len(to_delete_ids)
+
     async def vacuum(self) -> None:
         if not self._db:
             raise RuntimeError("Database not initialized")
