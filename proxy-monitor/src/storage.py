@@ -156,8 +156,6 @@ class Storage:
         
         now = int(time.time())
         window_start = now - window_minutes * 60
-        sparkline_start = now - 3600
-
         # 1. Totals
         async with self._db.execute(
             "SELECT proxy_fk, check_type, SUM(success), COUNT(*) FROM proxy_checks GROUP BY proxy_fk, check_type"
@@ -183,14 +181,19 @@ class Storage:
         ) as cur:
             last_rows = await cur.fetchall()
 
-        # 4. Sparklines
+        # 4. Sparklines: last 60 checks for each proxy + type
         async with self._db.execute(
             """
-            SELECT proxy_fk, check_type, (timestamp / 60) * 60 AS bucket,
-                   SUM(success), COUNT(*) - SUM(success), AVG(latency_ms)
-            FROM proxy_checks WHERE timestamp >= ? GROUP BY proxy_fk, check_type, bucket ORDER BY bucket ASC
-            """,
-            (sparkline_start,),
+            WITH RecentChecks AS (
+                SELECT proxy_fk, check_type, timestamp, success, latency_ms,
+                       ROW_NUMBER() OVER (PARTITION BY proxy_fk, check_type ORDER BY timestamp DESC) as rn
+                FROM proxy_checks
+            )
+            SELECT proxy_fk, check_type, timestamp, success, 1 - success as fail, latency_ms
+            FROM RecentChecks
+            WHERE rn <= 60
+            ORDER BY proxy_fk, check_type, timestamp ASC
+            """
         ) as cur:
             sparkline_rows = await cur.fetchall()
 

@@ -208,20 +208,42 @@ function buildSparklineSvg(tcp, udp, pid) {
 }
 
 function renderStatBlock(label, stats, windowStats) {
-  const rate = successRate(stats);
+  const totalRate = successRate(stats);
+  const winRate = successRate(windowStats);
   const total = stats?.total || 0;
   if (!total) return '';
 
   const color = label === 'TCP' ? 'var(--accent)' : (label === 'UDP' ? 'var(--accent2)' : 'var(--text3)');
+  
+  // Bar represents the window success rate if we have window data, else total.
+  const barRate = windowStats?.total ? winRate : totalRate;
+  
+  let barClass = 'bar-danger';
+  let winColor = 'var(--danger)';
+
+  if (barRate >= 90) {
+    barClass = 'bar-high';
+    winColor = 'var(--success)';
+  } else if (barRate >= 65) {
+    barClass = 'bar-mid';
+    winColor = 'var(--warning)';
+  } else if (barRate >= 35) {
+    barClass = 'bar-low';
+    winColor = '#f57c40'; // Orange-ish
+  }
+
+  const windowInfo = windowStats && windowStats.total > 0
+    ? `<span class="s" style="color:${winColor}; font-weight:700">${windowStats.success}/${windowStats.total} recent</span>`
+    : '';
 
   return `
   <div class="stat-row">
     <div class="stat-label" style="color:${color}">${label}</div>
     <div class="stat-body">
-      <div class="stat-bar-bg"><div class="stat-bar ${rate > 50 ? 'bar-alive' : 'bar-dead'}" style="width:${rate}%"></div></div>
+      <div class="stat-bar-bg"><div class="stat-bar ${barClass}" style="width:${barRate}%"></div></div>
       <div class="stat-nums">
-        <span><span class="s">✓ ${stats.success}</span> / <span class="f">✕ ${stats.fail}</span> (${rate}%)</span>
-        <span class="s">${windowStats ? `${windowStats.success}/${windowStats.total} recent` : ''}</span>
+        <span><span class="s">✓ ${stats.success}</span> / <span class="f">✕ ${stats.fail}</span> (${totalRate}%)</span>
+        ${windowInfo}
       </div>
     </div>
   </div>`;

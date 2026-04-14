@@ -226,11 +226,19 @@
   transition: width 0.6s ease;
 }
 
-.bar-alive {
+.bar-high {
   background: linear-gradient(90deg, var(--success), rgba(18, 216, 138, 0.5));
 }
 
-.bar-dead {
+.bar-mid {
+  background: linear-gradient(90deg, var(--warning), rgba(245, 168, 64, 0.5));
+}
+
+.bar-low {
+  background: linear-gradient(90deg, #f57c40, rgba(245, 124, 64, 0.5));
+}
+
+.bar-danger {
   background: var(--danger);
 }
 
