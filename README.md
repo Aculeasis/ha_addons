@@ -6,8 +6,9 @@ This is a custom Home Assistant add-on repository.
 
 * **[gost-ss](gost-ss/)**: GOST / Shadowsocks client and proxy add-on.
 * **[privoxy](privoxy/)**: Privoxy non-caching web proxy add-on.
-* **[proxy-monitor](proxy-monitor/)**: Real-time SOCKS5 proxy monitoring dashboard.
+* **[adguardvpn](adguardvpn/)**: AdGuard VPN in SOCKS5 mode.
 * **[xray](xray/)**: Xray-core proxy add-on.
+* **[proxy-monitor](proxy-monitor/)**: Real-time SOCKS5 proxy monitoring dashboard.
 
 ## Installation
 

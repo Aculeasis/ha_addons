@@ -1,0 +1,73 @@
+name: "AdguardVPN"
+version: "1.0.0"
+slug: adguardvpn
+description: "AdGuard VPN SOCKS5 proxy"
+url: "https://github.com/Aculeasis/ha_addons/tree/main/adguardvpn"
+image: "ghcr.io/aculeasis/adguardvpn-{arch}"
+arch:
+  - aarch64
+  - amd64
+
+startup: services
+init: false
+# We have to use this because adguardvpn-cli binds to MAC and we lose the config if MAC changes
+host_network: true
+
+map:
+  - type: addon_config
+    read_only: false
+    path: /root/.local/share/adguardvpn-cli
+
+backup_exclude:
+  - "*/adguardvpn-cli"
+  - "*.log"
+  - "*.log.*"
+  - "*.socket"
+  - "*.pid"
+  - "*/resolv.conf"
+
+options:
+  mode: "normal"
+  location: "fastest"
+  auth:
+    adguard_user: ""
+    adguard_pass: ""
+    socks_user: "user"
+    socks_pass: "user"
+  adguard:
+    socks_port: 15554
+    version: ""
+    crash_reports: false
+    telemetry: false
+    show_connect_progress: false
+    log_max_size: 10
+  watchdog:
+    enabled: false
+    interval: 30
+    threshold: 6
+    pause: 30
+    test_host: "1.1.1.1"
+    test_port: 80
+
+schema:
+  mode: "list(normal|login|locations|reinstall|logout)"
+  location: "str"
+  auth:
+    adguard_user: "str?"
+    adguard_pass: "str?"
+    socks_user: "str"
+    socks_pass: "str"
+  adguard:
+    socks_port: "port"
+    version: "str?"
+    crash_reports: "bool"
+    telemetry: "bool"
+    log_max_size: "int(1,1000)"
+    show_connect_progress: "bool"
+  watchdog:
+    enabled: "bool"
+    interval: "int(10,3600)"
+    threshold: "int(1,100)"
+    pause: "int(1,1440)"
+    test_host: "str"
+    test_port: "port"
