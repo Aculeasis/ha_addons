@@ -1,6 +1,8 @@
 # Configuration
 
-This add-on has no options in the Home Assistant UI. All configuration is done via Privoxy configuration files placed in the add-on's own configuration directory.
+This Home Assistant add-on runs Privoxy, a non-caching web proxy with advanced filtering capabilities. It can block ads, manage cookies, modify HTTP headers, and filter web traffic for privacy enhancement.
+
+The add-on has no options in the Home Assistant UI. All configuration is done via Privoxy configuration files placed in the add-on's own configuration directory.
 
 ## Config Directory
 

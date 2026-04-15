@@ -1,6 +1,8 @@
 # Privoxy
 
-A Home Assistant add-on that runs a [Privoxy](https://www.privoxy.org/) non-caching web proxy with privacy-enhancing features.
+A [Home Assistant](https://www.home-assistant.io/) add-on that runs a [Privoxy](https://www.privoxy.org/) non-caching web proxy with privacy-enhancing features.
+
+**Why use this add-on?** Privoxy filters web traffic, blocks ads and tracking cookies, and enhances privacy. Useful when you want devices on your network (including Home Assistant itself) to access the internet through a privacy-focused proxy, or for integrating with other proxy tools like AdGuard Home.
 
 ## Installation
 

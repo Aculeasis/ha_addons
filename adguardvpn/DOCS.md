@@ -1,5 +1,7 @@
 # AdguardVPN
 
+A Home Assistant add-on that wraps AdGuard VPN CLI to provide a SOCKS5 proxy. Route traffic through AdGuard VPN servers for privacy and geo-location access.
+
 ## Setup
 
 1. Install → Set mode to `login` → Start

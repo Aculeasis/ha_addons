@@ -1,6 +1,6 @@
 # Xray Runner
 
-A Home Assistant add-on that launches an [Xray-core](https://github.com/XTLS/Xray-core) instance based on a standard `config.json` placed in the add-on's configuration directory.
+A Home Assistant add-on that runs [Xray-core](https://github.com/XTLS/Xray-core) — a powerful proxy platform supporting VLESS, VMess, Trojan, Shadowsocks, and other protocols. Use it to route traffic through proxy servers, bypass network restrictions, or set up secure tunnels directly from your Home Assistant instance.
 
 ## Installation
 

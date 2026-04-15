@@ -1,17 +1,25 @@
 # Configuration
 
-All configuration is done via a single `config.yaml` file in the add-on's configuration directory.
+Configuration is stored in `config.yaml`. Edit via the web UI (Settings panel) or directly by file.
 
-## Config Directory
-
-The file should be placed at:
+## Config Location
 
 ```
 /addon_configs/89e82855_proxy-monitor/config.yaml
 ```
 
-On first start, if no `config.yaml` is found, a default one is created automatically.
+A default config is created on first start. Access via File Editor, Samba (`addon_configs` share), or SSH.
 
-> **Note:** This is **not** the main Home Assistant config folder. Access it via File Editor, Samba (`addon_configs` share) or SSH.
+## Proxy Options
 
-All settings can also be changed live from the **Settings** panel in the web UI.
+| Option | Description |
+|--------|-------------|
+| `host`, `port` | Proxy server address |
+| `username`, `password` | SOCKS5 authentication (optional) |
+| `tcp_check` | Enable TCP check (default: true) |
+| `udp_check` | Enable UDP relay check (default: false) |
+
+## How Checks Work
+
+- **TCP** – Connects through SOCKS5, requests test URL, reports latency and external IP.
+- **UDP** – Sends DNS query through SOCKS5 UDP relay. For proxies supporting UDP.

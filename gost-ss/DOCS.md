@@ -1,6 +1,7 @@
 # Configuration
 
-This add-on has no options. All configuration is done via JSON and YAML files placed in the add-on's own configuration directory.
+This Home Assistant add-on runs [Shadowsocks-libev](https://github.com/shadowsocks/shadowsocks-libev) and [GOST v3](https://gost.run/) proxy instances based on config files you provide. No add-on options needed — just drop your config files and start.
+
 
 ## Config Directory
 

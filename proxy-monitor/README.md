@@ -1,21 +1,21 @@
-# Proxy Monitor for Home Assistant
+# Proxy Monitor
 
-Real-time SOCKS5 proxy monitoring dashboard with TCP and UDP checks.
+A Home Assistant add-on for real-time SOCKS5 proxy health monitoring.
 
 ![Proxy Monitor Dashboard](screenshot.jpg)
 
 ## Features
 
-- **TCP & UDP checks** – Full SOCKS5 support
-- **Real-time dashboard** – Live status updates via WebSockets
-- **Historical charts** – Success rate and latency tracking
-- **Web configuration** – Manage settings and proxies from the UI
-- **HA Ingress** – Secure access via Home Assistant
+- **TCP & UDP checks** – Full SOCKS5 protocol support
+- **Real-time dashboard** – Live status via WebSocket
+- **Historical charts** – Success rate and latency over time
+- **Web configuration** – Manage proxies from the UI
+- **Home Assistant Ingress** – Secure access without extra ports
 
 ## Installation
 
-1. Add this repository to your Home Assistant Supervisor.
-2. Search for "Proxy Monitor" in the Add-on Store.
-3. Install and start.
+1. Add this repository to Home Assistant Supervisor → Add-on Store.
+2. Search for "Proxy Monitor" and install.
+3. Click "Open Web UI" to configure.
 
-For detailed configuration, see the [Documentation](DOCS.md).
+For configuration, see [DOCS.md](DOCS.md).

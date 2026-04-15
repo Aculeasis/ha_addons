@@ -1,8 +1,11 @@
 # Shadowsocks & GOST Runner
 
-A Home Assistant add-on that automatically discovers and launches any number of [shadowsocks-libev](https://github.com/shadowsocks/shadowsocks-libev) or [GOST](https://gost.run/) instances based on standard config files placed in the add-on's configuration directory.
+A [Home Assistant](https://www.home-assistant.io/) add-on for running multiple Shadowsocks and GOST proxy instances directly on your Home Assistant system.
+
+**Why use this add-on?** If your Home Assistant needs to connect through a Shadowsocks or GOST proxy to reach external services — or if you want to run a proxy server on your HA machine — this add-on provides a simple, file-based way to manage any number of proxy instances without complex configuration.
 
 ## Features
+
 
 - Runs **any mix** of `ss-local`, `ss-server`, `ss-redir`, `ss-tunnel` and `gost` instances
 - Supports running **multiple instances** simultaneously
@@ -33,7 +36,7 @@ On startup, `run.sh`:
 4. Prefixes each instance's stdout/stderr with `[NAME]` for log clarity.
 5. Waits for a stop signal (`SIGTERM`/`SIGINT`/`SIGHUP`) and gracefully terminates all child processes.
 
-If no config files are found, the add-on exits with an error.
+If no config files are found, the add-on logs a warning and remains idle.
 
 ## Supported Architectures
 

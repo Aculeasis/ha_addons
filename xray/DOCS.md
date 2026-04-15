@@ -1,6 +1,6 @@
 # Configuration
 
-This add-on has no options in the Home Assistant UI. All configuration is done via a single `config.json` file placed in the add-on's own configuration directory.
+This Home Assistant add-on runs Xray-core with your custom configuration. There are no UI options — all settings are defined in a standard `config.json` file that you provide. This approach gives you full access to Xray's features: inbound/outbound rules, routing, DNS control, and more.
 
 ## Config Directory
 

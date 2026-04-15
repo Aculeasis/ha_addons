@@ -2,9 +2,9 @@
 
 > ⚠️ **This is an unofficial community add-on and is not affiliated with, endorsed by, or connected to AdGuard in any way.**
 
-SOCKS5 proxy with AdGuard VPN.
+A Home Assistant add-on that runs AdGuard VPN as a SOCKS5 proxy. Route traffic from Home Assistant, other add-ons, or network devices through AdGuard VPN servers for privacy and geo-location access.
 
-Official AdGuard VPN CLI: https://github.com/AdguardTeam/AdGuardVPNCLI
+Uses the official [AdGuard VPN CLI](https://github.com/AdguardTeam/AdGuardVPNCLI).
 
 ## Quick Start
 

@@ -1,5 +1,27 @@
-# ⚠️ Private Add-on / Приватный аддон
+# Remote S.M.A.R.T.
 
-**[RU]** Это приватный аддон, предназначенный исключительно для личного использования автором. Пожалуйста, не устанавливайте и не используйте его, так как он не предназначен для публичного использования и содержит специфичные настройки.
+A Home Assistant add-on that reads S.M.A.R.T. data from storage devices and publishes it to MQTT for monitoring.
 
-**[EN]** This is a private add-on intended solely for the author's personal use. Please do not install or use it, as it is not meant for public use and contains highly specific configurations.
+## Features
+
+- **SMART monitoring** – Temperature, health status, power-on hours, and more
+- **MQTT auto-discovery** – Sensors appear automatically in Home Assistant
+- **Multiple devices** – Monitor SSDs, HDDs, NVMe drives
+- **Custom commands** – Override default smartctl arguments per device
+- **Sleep detection** – Handles drives in standby mode gracefully
+
+## Quick Start
+
+1. Install the add-on
+2. Configure your storage devices in the add-on options
+3. Start the add-on
+4. Sensors appear under `sensor.remote_smart_*` in Home Assistant
+
+## Device Configuration
+
+Each device requires:
+- **device** – Linux device name (e.g., `sda`, `nvme0`)
+- **id** – Unique sensor identifier
+- **name** – Friendly name (optional)
+
+For detailed configuration, see [DOCS.md](DOCS.md).
