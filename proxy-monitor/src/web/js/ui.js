@@ -214,20 +214,20 @@ function renderStatBlock(label, stats, windowStats) {
   if (!total) return '';
 
   const color = label === 'TCP' ? 'var(--accent)' : (label === 'UDP' ? 'var(--accent2)' : 'var(--text3)');
-  
+
   // Bar represents the window success rate if we have window data, else total.
   const barRate = windowStats?.total ? winRate : totalRate;
-  
+
   let barClass = 'bar-danger';
   let winColor = 'var(--danger)';
 
-  if (barRate >= 90) {
+  if (barRate >= 75) {
     barClass = 'bar-high';
     winColor = 'var(--success)';
-  } else if (barRate >= 65) {
+  } else if (barRate >= 50) {
     barClass = 'bar-mid';
     winColor = 'var(--warning)';
-  } else if (barRate >= 35) {
+  } else if (barRate >= 25) {
     barClass = 'bar-low';
     winColor = '#f57c40'; // Orange-ish
   }
