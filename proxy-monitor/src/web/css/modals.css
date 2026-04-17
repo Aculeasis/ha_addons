@@ -41,6 +41,7 @@
   color: var(--success);
 }
 
+
 .dib-value.bad {
   color: var(--danger);
 }
@@ -248,11 +249,11 @@
     padding: 10px;
     gap: 8px;
   }
-  
+
   .proxy-item-name {
     font-size: 12px;
   }
-  
+
   .proxy-item-addr {
     font-size: 11px;
   }

@@ -28,6 +28,7 @@
   --success: #12d88a;
   --danger: #f54a4a;
   --warning: #f5a840;
+  --disabled: #6b7280;
 
   --shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
   --shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.35);
@@ -53,6 +54,7 @@
   --success: #10b981;
   --danger: #ef4444;
   --warning: #f59e0b;
+  --disabled: #9ca3af;
 
   --shadow: 0 10px 40px rgba(0, 0, 0, 0.04);
   --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.02);
@@ -79,6 +81,7 @@
     --success: #10b981;
     --danger: #ef4444;
     --warning: #f59e0b;
+    --disabled: #9ca3af;
 
     --shadow: 0 10px 40px rgba(0, 0, 0, 0.04);
     --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.02);

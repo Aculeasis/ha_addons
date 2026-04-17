@@ -133,7 +133,7 @@ def save_config(cfg: Dict[str, Any]) -> None:
         yaml.dump(cfg, fh, default_flow_style=False, allow_unicode=True)
 
 
-def proxy_id(proxy: Dict) -> str:
+def get_proxy_id(proxy: Dict) -> str:
     return f"{proxy['host']}:{proxy['port']}"
 
 
@@ -243,7 +243,7 @@ async def _run_checks() -> None:
                 await asyncio.sleep(delay)
 
             async with sem:
-                pid = proxy_id(proxy)
+                pid = get_proxy_id(proxy)
                 try:
                     results = await checker.check_proxy(proxy)  # type: ignore[union-attr]
                     now = int(time.time())
@@ -262,8 +262,8 @@ async def _run_checks() -> None:
                         proxy.get("name", pid),
                         {ct: ("OK" if r["success"] else f"FAIL({r['error']})") for ct, r in results.items()},
                     )
-                except Exception as exc:
-                    logger.error("Unhandled error checking %s: %s", proxy.get("name", pid), exc)
+                except Exception as err:
+                    logger.error("Unhandled error checking %s: %s", proxy.get("name", pid), err)
 
         try:
             # Plan checks with incremental delays
@@ -298,9 +298,9 @@ async def _run_cleanup() -> None:
         try:
             if storage:
                 # Sync proxies: remove those that are no longer in the config
-                configured_ids = [proxy_id(p) for p in config.get("proxies", [])]
+                configured_ids = [get_proxy_id(p) for p in config.get("proxies", [])]
                 await storage.sync_proxies(configured_ids)
-                
+
                 # Cleanup old data
                 retention = config.get("storage", {}).get("retention_days", 30)
                 await storage.cleanup_old_data(retention)
@@ -342,13 +342,21 @@ async def _all_stats() -> Dict[str, Any]:
     all_summaries = await storage.get_all_summaries(window)  # type: ignore[union-attr]
 
     for proxy in proxies:
-        pid = proxy_id(proxy)
+        pid = get_proxy_id(proxy)
         summary = all_summaries.get(pid, {})
 
         last_checks: Dict = summary.get("last_checks", {})
         is_alive = False
         all_clean = True
-        external_ip: Optional[str] = None
+
+        # Check if any protocol is enabled
+        has_tcp = proxy.get("tcp_check", True)
+        has_udp = proxy.get("udp_check", False)
+        any_enabled = has_tcp or has_udp
+
+        # Collect external IPs from each check type
+        tcp_ip: Optional[str] = None
+        udp_ip: Optional[str] = None
 
         for ct in ["tcp", "udp"]:
             # Check if this protocol is enabled for this proxy
@@ -358,21 +366,30 @@ async def _all_stats() -> Dict[str, Any]:
                 lc = last_checks.get(ct, {})
                 if lc.get("success"):
                     is_alive = True
-                    if lc.get("error"):
-                        all_clean = False
                 else:
                     all_clean = False
 
+                # Store IP per protocol for fallback logic
                 if lc.get("external_ip"):
-                    external_ip = lc["external_ip"]
+                    if ct == "tcp":
+                        tcp_ip = lc["external_ip"]
+                    else:
+                        udp_ip = lc["external_ip"]
 
-        if is_alive:
-            if all_clean:
-                alive_count += 1
+        # Fallback: use TCP IP if available, otherwise use UDP IP
+        # This handles cases where TCP is disabled or TCP check failed to get IP
+        external_ip = tcp_ip or udp_ip
+
+        # Only count as alive/partial/dead if at least one protocol is enabled
+        # Disabled proxies (no protocols enabled) are not counted in summary
+        if any_enabled:
+            if is_alive:
+                if all_clean:
+                    alive_count += 1
+                else:
+                    partial_count += 1
             else:
-                partial_count += 1
-        else:
-            dead_count += 1
+                dead_count += 1
 
         proxy_list.append(
             {
@@ -454,10 +471,6 @@ async def lifespan(app: FastAPI):
                 await task
             except asyncio.CancelledError:
                 pass
-
-    # Close checker sessions
-    if checker:
-        await checker.close()
 
     # Close database connection
     if storage:
@@ -597,9 +610,9 @@ async def api_db_vacuum(_: None = Depends(_require_auth)) -> Dict:
     try:
         if storage:
             # Sync proxies: remove those that are no longer in the config
-            configured_ids = [proxy_id(p) for p in config.get("proxies", [])]
+            configured_ids = [get_proxy_id(p) for p in config.get("proxies", [])]
             await storage.sync_proxies(configured_ids)
-            
+
             await storage.vacuum()
             return {"status": "ok", "message": "Database optimized successfully"}
         else:
@@ -684,7 +697,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             except WebSocketDisconnect:
                 break
     except Exception as exc:
-        logger.debug("WebSocket closed: %s", exc)
+        logger.error("WebSocket error: %s", exc, exc_info=True)
     finally:
         ws_clients.discard(websocket)
 
@@ -720,7 +733,7 @@ async def serve_static(path: str) -> FileResponse:
 #  Entry point                                                         #
 # ------------------------------------------------------------------ #
 
-if __name__ == "__main__":
+def _main():
     _cfg = load_config()
     srv = _cfg.get("server", {})
     uvicorn.run(
@@ -730,3 +743,6 @@ if __name__ == "__main__":
         reload=False,
         log_level="info",
     )
+
+if __name__ == "__main__":
+    _main()

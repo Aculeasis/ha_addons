@@ -6,6 +6,9 @@ function openDetail(pid) {
   const proxy = state.proxies.find(p => p.id === pid);
   if (!proxy) return;
 
+  // Don't open if both TCP and UDP checks are disabled
+  if (!proxy.tcp_check && !proxy.udp_check) return;
+
   // Auto-select the first available check type so UDP-only proxies don't load an empty TCP chart
   if (proxy.tcp_check) state.detailCheckType = 'tcp';
   else if (proxy.udp_check) state.detailCheckType = 'udp';
@@ -26,6 +29,49 @@ function closeDetailIfBg(e) {
   if (e.target.id === 'detail-modal') closeDetail();
 }
 
+// Get status for currently selected protocol (returns null if no checks enabled)
+function getCurrentProtocolStatus(proxy) {
+  const hasTcp = !!proxy.tcp_check;
+  const hasUdp = !!proxy.udp_check;
+
+  // If no checks enabled, return null
+  if (!hasTcp && !hasUdp) return null;
+
+  const checkType = state.detailCheckType;
+  const lc = proxy.stats?.last_checks || {};
+  const checkRes = lc[checkType] || {};
+
+  const isOnline = !!checkRes.success;
+  return {
+    protocol: checkType.toUpperCase(),
+    status: isOnline ? 'online' : 'offline',
+    text: isOnline ? '● Online' : '● Offline',
+    className: isOnline ? 'good' : 'bad'
+  };
+}
+
+// Get error if it occurred within the dashboard window period
+function getWindowError(proxy, checkType) {
+  const lc = proxy.stats?.last_checks || {};
+  const lastCheck = lc[checkType];
+
+  if (!lastCheck || !lastCheck.error || !lastCheck.error_timestamp) {
+    return null;
+  }
+
+  // Check if error_timestamp is within the dashboard window
+  const windowMinutes = state.meta?.window_minutes || 5;
+  const now = Math.floor(Date.now() / 1000);
+  const windowStart = now - windowMinutes * 60;
+
+  // Show error only if error_timestamp is within the window
+  if (lastCheck.error_timestamp >= windowStart) {
+    return lastCheck.error;
+  }
+
+  return null;
+}
+
 // Build only the info-blocks HTML (called both on first render and on live updates)
 function buildDetailInfoHtml(proxy) {
   const lc = proxy.stats?.last_checks || {};
@@ -37,11 +83,18 @@ function buildDetailInfoHtml(proxy) {
   const udpTotal = tot.udp ? `${tot.udp.success}/${tot.udp.total} (${successRate(tot.udp)}%)` : '—';
   const checks = proxy.tcp_check && proxy.udp_check ? 'TCP + UDP' : proxy.tcp_check ? 'TCP' : 'UDP';
 
-  return `
+  const statusInfo = getCurrentProtocolStatus(proxy);
+  const primaryError = getWindowError(proxy, state.detailCheckType);
+
+  // Build status block only if there's an active check
+  const statusBlock = statusInfo ? `
   <div class="detail-info-block">
-    <div class="dib-label">Status</div>
-    <div class="dib-value ${proxy.is_alive ? 'good' : 'bad'}">${proxy.is_alive ? '● Online' : '● Offline'}</div>
-  </div>
+    <div class="dib-label">${statusInfo.protocol} Status</div>
+    <div class="dib-value ${statusInfo.className}">${statusInfo.text}</div>
+  </div>` : '';
+
+  return `
+  ${statusBlock}
   <div class="detail-info-block">
     <div class="dib-label">Address</div>
     <div class="dib-value privacy" style="font-size:13px;font-family:monospace">${esc(proxy.host)}:${proxy.port}</div>
@@ -66,9 +119,9 @@ function buildDetailInfoHtml(proxy) {
     <div class="dib-label">Check types</div>
     <div class="dib-value" style="font-size:13px">${checks}</div>
   </div>
-  ${primaryLc?.error ? `<div class="detail-info-block" style="border-color:rgba(245,74,74,0.35)">
+  ${primaryError ? `<div class="detail-info-block" style="border-color:rgba(245,74,74,0.35)">
     <div class="dib-label" style="color:var(--danger)">Last error</div>
-    <div class="dib-value" style="font-size:11px;color:var(--danger)">${esc(primaryLc.error)}</div>
+    <div class="dib-value" style="font-size:11px;color:var(--danger)">${esc(primaryError)}</div>
   </div>` : ''}`;
 }
 

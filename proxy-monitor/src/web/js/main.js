@@ -18,3 +18,17 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ESC key handler for closing modals
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    // Close detail modal (chart)
+    if (!document.getElementById('detail-modal').classList.contains('hidden')) {
+      closeDetail();
+    }
+    // Close settings modal
+    else if (!document.getElementById('settings-modal').classList.contains('hidden')) {
+      closeSettings();
+    }
+  }
+});

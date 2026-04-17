@@ -8,15 +8,22 @@ UDP check : issues a SOCKS5 UDP ASSOCIATE, then sends a real DNS A-query for
 """
 import asyncio
 import logging
+import re
 import socket
-import struct
 import time
 from typing import Any, Dict, Optional
 
 import aiohttp
+import socks
 from aiohttp_socks import ProxyConnector
 
 logger = logging.getLogger(__name__)
+
+
+def _format_error(exc: Exception) -> str:
+    """Format exception as error message, truncated to 250 chars."""
+    msg = str(exc)
+    return msg[:250] if msg else f"{type(exc).__name__}"
 
 
 class ProxyChecker:
@@ -24,24 +31,6 @@ class ProxyChecker:
         self.config = config
         self._tcp_test_url: Optional[str] = None
         self._timeout: Optional[float] = None
-        self._connector: Optional[aiohttp.TCPConnector] = None
-
-    async def _get_connector(self) -> aiohttp.TCPConnector:
-        """Get or create a shared TCP connector for connection pooling."""
-        if self._connector is None or self._connector.closed:
-            self._connector = aiohttp.TCPConnector(
-                limit=100,  # Total connection pool size
-                limit_per_host=10,  # Per-host limit
-                ttl_dns_cache=300,  # DNS cache TTL
-                enable_cleanup_closed=True,
-            )
-        return self._connector
-
-    async def close(self) -> None:
-        """Close the connector and cleanup resources."""
-        if self._connector and not self._connector.closed:
-            await self._connector.close()
-            self._connector = None
 
     # ------------------------------------------------------------------ #
     #  Helpers (cached)                                                    #
@@ -62,7 +51,8 @@ class ProxyChecker:
             )
         return self._tcp_test_url
 
-    def _proxy_url(self, proxy: Dict) -> str:
+    @staticmethod
+    def _proxy_url(proxy: Dict) -> str:
         host = proxy["host"]
         port = proxy["port"]
         user = proxy.get("username", "") or ""
@@ -71,9 +61,6 @@ class ProxyChecker:
             return f"socks5://{user}:{pwd}@{host}:{port}"
         return f"socks5://{host}:{port}"
 
-    # ------------------------------------------------------------------ #
-    #  TCP check                                                           #
-    # ------------------------------------------------------------------ #
     async def check_tcp(self, proxy: Dict) -> Dict[str, Any]:
         """Check TCP connectivity through the SOCKS5 proxy."""
         timeout = self._get_timeout()
@@ -126,164 +113,59 @@ class ProxyChecker:
                 "success": False,
                 "latency_ms": round(latency, 2),
                 "external_ip": None,
-                "error": str(exc)[:250],
+                "error": _format_error(exc),
             }
 
-    # ------------------------------------------------------------------ #
-    #  UDP check (SOCKS5 UDP ASSOCIATE + DNS query)                       #
-    # ------------------------------------------------------------------ #
-    async def check_udp(self, proxy: Dict) -> Dict[str, Any]:
-        """Check UDP connectivity through the SOCKS5 proxy via DNS query."""
+    def _check_udp_sync(self, proxy: Dict) -> Dict[str, Any]:
+        """Synchronous UDP check using socks library (run in executor)."""
         host = proxy["host"]
         port = proxy["port"]
-        user = proxy.get("username", "") or ""
-        pwd = proxy.get("password", "") or ""
+        user = proxy.get("username", "") or None
+        pwd = proxy.get("password", "") or None
         timeout = self._get_timeout()
-        start = time.monotonic()
-        reader: Optional[asyncio.StreamReader] = None
-        writer: Optional[asyncio.StreamWriter] = None
-        udp_sock: Optional[socket.socket] = None
 
-        def remaining() -> float:
-            return max(0.5, timeout - (time.monotonic() - start))
-
+        # DNS TXT query: CH whoami.cloudflare
+        dns_query = (
+            b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+            b"\x06whoami\x0acloudflare\x00"
+            b"\x00\x10\x00\x03"
+        )
+        result = {
+            "success": False,
+            "latency_ms": None,
+            "external_ip": None,
+            "error": None,
+        }
+        sock = socks.socksocket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            # 1 ── Open TCP connection to proxy ──────────────────────────
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port), timeout=timeout
-            )
+            sock.set_proxy(socks.SOCKS5, host, port, username=user, password=pwd)
+            sock.settimeout(timeout)
+            start_time = time.perf_counter()
+            try:
+                sock.sendto(dns_query, ("1.1.1.1", 53))
+                data, _ = sock.recvfrom(512)
+            finally:
+                result["latency_ms"] = round((time.perf_counter() - start_time) * 1000, 2)
+            result["success"] = True
 
-            # 2 ── SOCKS5 greeting ────────────────────────────────────────
-            writer.write(b"\x05\x02\x00\x02" if (user and pwd) else b"\x05\x01\x00")
-            await writer.drain()
-
-            greeting = await asyncio.wait_for(reader.read(2), timeout=remaining())
-            if len(greeting) < 2 or greeting[0] != 0x05:
-                raise ValueError(f"Bad SOCKS5 greeting: {greeting!r}")
-            method = greeting[1]
-
-            if method == 0xFF:
-                raise ValueError("No acceptable auth methods offered by proxy")
-
-            if method == 0x02:
-                # Username / password sub-negotiation (RFC 1929)
-                auth_payload = (
-                    bytes([0x01, len(user)])
-                    + user.encode()
-                    + bytes([len(pwd)])
-                    + pwd.encode()
-                )
-                writer.write(auth_payload)
-                await writer.drain()
-                auth_resp = await asyncio.wait_for(reader.read(2), timeout=remaining())
-                if len(auth_resp) < 2 or auth_resp[1] != 0x00:
-                    raise ValueError("SOCKS5 username/password authentication failed")
-
-            # 3 ── UDP ASSOCIATE request ──────────────────────────────────
-            # CMD=0x03, ATYP=0x01 (IPv4), DST.ADDR/PORT = 0 (let proxy pick)
-            writer.write(b"\x05\x03\x00\x01\x00\x00\x00\x00\x00\x00")
-            await writer.drain()
-
-            bound = await asyncio.wait_for(reader.read(10), timeout=remaining())
-            if len(bound) < 10:
-                raise ValueError(f"Truncated UDP ASSOCIATE response: {bound!r}")
-            if bound[1] != 0x00:
-                err_codes = {
-                    1: "general SOCKS failure",
-                    2: "connection not allowed",
-                    3: "network unreachable",
-                    4: "host unreachable",
-                    5: "connection refused",
-                    7: "command not supported",
-                }
-                raise ValueError(
-                    f"UDP ASSOCIATE rejected: {err_codes.get(bound[1], bound[1])}"
-                )
-
-            # BND.ADDR / BND.PORT – where we send UDP frames
-            relay_ip = socket.inet_ntoa(bound[4:8])
-            relay_port = struct.unpack("!H", bound[8:10])[0]
-            if relay_ip == "0.0.0.0":
-                relay_ip = host  # proxy said "use my address"
-
-            # 4 ── Create local UDP socket ────────────────────────────────
-            # Use a blocking socket with a timeout – run_in_executor already
-            # runs it in a thread pool, so the event loop is not blocked.
-            # setblocking(False) causes WSAEWOULDBLOCK on Windows immediately
-            # because the OS can't complete the send/recv synchronously.
-            udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            udp_sock.settimeout(remaining())
-
-            # Minimal DNS A-query for www.google.com
-            dns_query = (
-                b"\xab\xcd"  # Transaction ID
-                b"\x01\x00"  # Flags: RD=1 (recursion desired)
-                b"\x00\x01"  # QDCOUNT=1
-                b"\x00\x00\x00\x00\x00\x00"  # AN/NS/AR = 0
-                b"\x03www\x06google\x03com\x00"  # QNAME
-                b"\x00\x01"  # QTYPE  A
-                b"\x00\x01"  # QCLASS IN
-            )
-
-            # SOCKS5 UDP request header: RSV(2) FRAG(1) ATYP(1) DST.ADDR(4) DST.PORT(2)
-            udp_frame = (
-                b"\x00\x00"  # RSV
-                b"\x00"  # FRAG
-                b"\x01"  # ATYP IPv4
-                + socket.inet_aton("8.8.8.8")  # DST.ADDR (Google DNS)
-                + struct.pack("!H", 53)  # DST.PORT
-                + dns_query
-            )
-
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None, udp_sock.sendto, udp_frame, (relay_ip, relay_port)
-            )
-            # Refresh socket timeout to reflect remaining budget after sendto
-            udp_sock.settimeout(remaining())
-            resp_data: bytes = await asyncio.wait_for(
-                loop.run_in_executor(None, udp_sock.recv, 4096),
-                timeout=remaining() + 0.5,  # outer guard: socket timeout fires first
-            )
-
-            # A valid SOCKS5 UDP response starts with 4 header bytes + at least
-            # a minimal DNS reply (12 bytes header)
-            if len(resp_data) < 16:
-                raise ValueError(
-                    f"UDP relay response too short ({len(resp_data)} bytes)"
-                )
-
-            latency = (time.monotonic() - start) * 1000
-            return {
-                "success": True,
-                "latency_ms": round(latency, 2),
-                "external_ip": None,
-                "error": None,
-            }
-
-        except asyncio.TimeoutError:
-            return {
-                "success": False,
-                "latency_ms": round((time.monotonic() - start) * 1000, 2),
-                "external_ip": None,
-                "error": "Timeout",
-            }
+            # DNS TXT record format: <length byte><text data>
+            # Search for IPv4 address pattern directly in the response
+            match = re.search(rb'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', data)
+            result["external_ip"] = match.group(1).decode('utf-8') if match else None
+        except socket.timeout:
+            result["error"] = "Timeout"
         except Exception as exc:
-            return {
-                "success": False,
-                "latency_ms": round((time.monotonic() - start) * 1000, 2),
-                "external_ip": None,
-                "error": str(exc)[:250],
-            }
+            result["error"] = _format_error(exc)
         finally:
-            if writer:
-                try:
-                    writer.close()
-                    await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
-                except Exception:
-                    pass
-            if udp_sock:
-                udp_sock.close()
+            sock.close()
+
+        return result
+
+    async def check_udp(self, proxy: Dict) -> Dict[str, Any]:
+        """Check UDP connectivity through the SOCKS5 proxy via DNS query."""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, self._check_udp_sync, proxy)
+        return result
 
     # ------------------------------------------------------------------ #
     #  Run all configured checks concurrently                             #
@@ -310,7 +192,7 @@ class ProxyChecker:
                     "success": False,
                     "latency_ms": 0.0,
                     "external_ip": None,
-                    "error": str(res)[:250],
+                    "error": _format_error(res),
                 }
             else:
                 results[ct] = res  # type: ignore[assignment]

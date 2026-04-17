@@ -57,6 +57,10 @@
   border-left: 3px solid var(--warning);
 }
 
+.proxy-card.disabled-card {
+  border-left: 3px solid var(--disabled);
+}
+
 /* card header */
 .card-header {
   display: flex;
@@ -88,6 +92,10 @@
 
 .status-dot.partial {
   background: var(--warning);
+}
+
+.status-dot.disabled {
+  background: var(--disabled);
 }
 
 @keyframes pulse-card {

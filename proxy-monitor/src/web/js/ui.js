@@ -74,9 +74,12 @@ function cardStatus(proxy) {
   const tcpRes = lc.tcp || {};
   const udpRes = lc.udp || {};
 
-  // A check is "clean" if it is successful AND has no error message
-  const tcpClean = !hasTcp || (!!tcpRes.success && !tcpRes.error);
-  const udpClean = !hasUdp || (!!udpRes.success && !udpRes.error);
+  // If both protocols are disabled, show as disabled
+  if (!hasTcp && !hasUdp) return 'disabled';
+
+  // A check is "clean" if it is successful (error is preserved, but we check last success)
+  const tcpClean = !hasTcp || !!tcpRes.success;
+  const udpClean = !hasUdp || !!udpRes.success;
 
   // proxy.is_alive is already computed by the server as (enabled_tcp_success || enabled_udp_success)
   if (proxy.is_alive && tcpClean && udpClean) return 'alive';
