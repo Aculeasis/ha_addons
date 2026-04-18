@@ -1,5 +1,31 @@
 'use strict';
 
+// ─── Render caches ────────────────────────────────────────────────
+const _cardHashes = new Map(); // proxy.id → data fingerprint
+let _navHash = '';
+
+/**
+ * Lightweight fingerprint of everything rendered on a proxy card.
+ * Returning the same string means the card DOM is already up-to-date.
+ */
+function _proxyHash(proxy) {
+  const lc = proxy.stats?.last_checks || {};
+  const win = proxy.stats?.window || {};
+  const tot = proxy.stats?.total || {};
+  const sp = proxy.stats?.sparkline || {};
+  const spStr = (a) => a ? a.map(d => d.success + '/' + d.fail).join(',') : '';
+  return [
+    proxy.is_alive, proxy.external_ip,
+    lc.tcp?.success, lc.tcp?.latency_ms,
+    lc.udp?.success, lc.udp?.latency_ms,
+    tot.tcp?.success, tot.tcp?.fail,
+    tot.udp?.success, tot.udp?.fail,
+    win.tcp?.success, win.tcp?.total, win.tcp?.lat_avg, win.tcp?.lat_min, win.tcp?.lat_max,
+    win.udp?.success, win.udp?.total, win.udp?.lat_avg, win.udp?.lat_min, win.udp?.lat_max,
+    spStr(sp.tcp), spStr(sp.udp)
+  ].join('|');
+}
+
 // ─── Stats update ─────────────────────────────────────────────────
 function handleStats(data) {
   state.proxies = data.proxies || [];
@@ -20,16 +46,22 @@ function updateNav() {
     if (names[s]) names[s].push(p.name);
   });
 
-  const listHtml = (type) => {
-    if (!names[type].length) return '';
-    return `<div class="pill-list">${names[type].map(n => `<div class="pill-list-item">${esc(n)}</div>`).join('')}</div>`;
-  };
+  // Skip rebuilding nav pills if nothing changed
+  const pillsHash = `${total}|${alive}|${partial}|${dead}|${names.alive}|${names.partial}|${names.dead}`;
+  if (pillsHash !== _navHash) {
+    _navHash = pillsHash;
 
-  document.getElementById('nav-pills').innerHTML = `
-    <div class="pill total">Total: ${total}</div>
-    <div class="pill alive">🟢 Alive: ${alive}${listHtml('alive')}</div>
-    <div class="pill partial">🟡 Partial: ${partial}${listHtml('partial')}</div>
-    <div class="pill dead">🔴 Dead: ${dead}${listHtml('dead')}</div>`;
+    const listHtml = (type) => {
+      if (!names[type].length) return '';
+      return `<div class="pill-list">${names[type].map(n => `<div class="pill-list-item">${esc(n)}</div>`).join('')}</div>`;
+    };
+
+    document.getElementById('nav-pills').innerHTML = `
+      <div class="pill total">Total: ${total}</div>
+      <div class="pill alive">🟢 Alive: ${alive}${listHtml('alive')}</div>
+      <div class="pill partial">🟡 Partial: ${partial}${listHtml('partial')}</div>
+      <div class="pill dead">🔴 Dead: ${dead}${listHtml('dead')}</div>`;
+  }
 
   if (state.lastUpdated) {
     const is12h = state.meta?.time_format === '12h';
@@ -172,7 +204,8 @@ function successRate(stats) {
   return t ? Math.round((stats.success / t) * 100) : 0;
 }
 
-function buildSparklineSvg(tcp, udp, pid) {
+function buildSparklineSvg(tcp, udp) {
+  // Gradient defs moved to global SVG sprite in index.html
   const W = 300, H = 40, pad = 2;
   const build = (data) => {
     if (!data || data.length < 2) return null;
@@ -190,21 +223,10 @@ function buildSparklineSvg(tcp, udp, pid) {
   const u = build(udp);
   if (!t && !u) return '<svg></svg>';
 
-  const id = String(pid).replace(/[^a-z0-9]/gi, '');
   return `
   <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <defs>
-      <linearGradient id="gt${id}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#5b8af5" stop-opacity="0.3"/>
-        <stop offset="100%" stop-color="#5b8af5" stop-opacity="0"/>
-      </linearGradient>
-      <linearGradient id="gu${id}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#9b5cf5" stop-opacity="0.2"/>
-        <stop offset="100%" stop-color="#9b5cf5" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-    ${t ? `<polygon points="${t.fill}" fill="url(#gt${id})"/>` : ''}
-    ${u ? `<polygon points="${u.fill}" fill="url(#gu${id})"/>` : ''}
+    ${t ? `<polygon points="${t.fill}" fill="url(#sparkline-grad-tcp)"/>` : ''}
+    ${u ? `<polygon points="${u.fill}" fill="url(#sparkline-grad-udp)"/>` : ''}
     ${t ? `<polyline points="${t.pts}" fill="none" stroke="#5b8af5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
     ${u ? `<polyline points="${u.pts}" fill="none" stroke="#9b5cf5" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
   </svg>`;
@@ -253,6 +275,19 @@ function renderStatBlock(label, stats, windowStats) {
 }
 
 
+// ─── Lat badge HTML (no inline event handlers) ────────────────────
+function latBadgeHtml(label, lat, winStats) {
+  const w = winStats || {};
+  const color = label === 'TCP' ? 'var(--accent)' : (label === 'UDP' ? 'var(--accent2)' : 'var(--text3)');
+  return `<div class="lat-entry">
+    <span class="lat-label" style="color:${color};cursor:pointer">${label}</span>
+    <span class="stat-latency ${latencyClass(lat)}"
+          data-last="${lat ?? ''}" data-avg="${w.lat_avg ?? ''}"
+          data-min="${w.lat_min ?? ''}" data-max="${w.lat_max ?? ''}"
+          data-label="${label}" style="cursor:pointer">${fmtLatency(lat)}</span>
+  </div>`;
+}
+
 function buildCard(proxy) {
   const el = document.createElement('div');
   el.className = 'proxy-card';
@@ -264,6 +299,15 @@ function buildCard(proxy) {
 
 function updateCard(el, proxy) {
   const status = cardStatus(proxy);
+  const newHash = _proxyHash(proxy);
+
+  if (newHash === _cardHashes.get(proxy.id)) {
+    // Data unchanged — only fix class if status flipped (rare edge case)
+    const want = `proxy-card ${status}-card`;
+    if (el.className !== want) el.className = want;
+    return;
+  }
+  _cardHashes.set(proxy.id, newHash);
   el.className = `proxy-card ${status}-card`;
 
   const lc = proxy.stats?.last_checks || {};
@@ -271,28 +315,9 @@ function updateCard(el, proxy) {
   const win = proxy.stats?.window || {};
   const spark = proxy.stats?.sparkline || {};
 
-  // per-type last latency
   const tcpLat = lc.tcp?.latency_ms ?? null;
   const udpLat = lc.udp?.latency_ms ?? null;
 
-  // Build latency column for card-header top-right
-  function latBadgeHtml(label, lat, winStats) {
-    const w = winStats || {};
-    const color = label === 'TCP' ? 'var(--accent)' : (label === 'UDP' ? 'var(--accent2)' : 'var(--text3)');
-    const show = "event.stopPropagation(); showLatTip(this.parentElement.querySelector('.stat-latency'), event)";
-    const hover = "showLatTip(this.parentElement.querySelector('.stat-latency'), event)";
-    return `<div class="lat-entry">
-      <span class="lat-label" style="color:${color};cursor:pointer"
-            onmouseenter="${hover}" onmouseleave="hideLatTip()"
-            onclick="${show}">${label}</span>
-      <span class="stat-latency ${latencyClass(lat)}"
-            onmouseenter="showLatTip(this,event)" onmouseleave="hideLatTip()"
-            onclick="${show}"
-            data-last="${lat ?? ''}" data-avg="${w.lat_avg ?? ''}"
-            data-min="${w.lat_min ?? ''}" data-max="${w.lat_max ?? ''}"
-            data-label="${label}" style="cursor:pointer">${fmtLatency(lat)}</span>
-    </div>`;
-  }
   const latEntries = [];
   if (proxy.tcp_check && tcpLat != null) latEntries.push(latBadgeHtml('TCP', tcpLat, win.tcp));
   if (proxy.udp_check && udpLat != null) latEntries.push(latBadgeHtml('UDP', udpLat, win.udp));
@@ -300,7 +325,7 @@ function updateCard(el, proxy) {
     ? `<div class="card-lat">${latEntries.join('')}</div>` : '';
 
   const tags = (proxy.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
-  const sparkSvg = buildSparklineSvg(spark.tcp, spark.udp, proxy.id);
+  const sparkSvg = buildSparklineSvg(spark.tcp, spark.udp);
 
   const tcpBlock = proxy.tcp_check ? renderStatBlock('TCP', total.tcp, win.tcp) : '';
   const udpBlock = proxy.udp_check ? renderStatBlock('UDP', total.udp, win.udp) : '';
@@ -322,4 +347,18 @@ function updateCard(el, proxy) {
   </div>
   <div class="card-stats">${tcpBlock}${udpBlock}</div>
   <div class="sparkline-wrap">${sparkSvg}</div>`;
+
+  // Wire lat-badge events as proper listeners (not inline onXxx attributes)
+  el.querySelectorAll('.lat-entry').forEach(entry => {
+    const badge = entry.querySelector('.stat-latency');
+    const lbl = entry.querySelector('.lat-label');
+    if (!badge) return;
+    const show = (e) => { e.stopPropagation(); showLatTip(badge, e); };
+    [badge, lbl].forEach(t => {
+      if (!t) return;
+      t.addEventListener('mouseenter', (e) => showLatTip(badge, e));
+      t.addEventListener('mouseleave', hideLatTip);
+      t.addEventListener('click', show);
+    });
+  });
 }

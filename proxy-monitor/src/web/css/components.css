@@ -76,8 +76,7 @@
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  background: rgba(var(--bg2-rgb), 0.95);
-  backdrop-filter: blur(16px);
+  background: rgba(var(--bg2-rgb), 0.98);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
@@ -90,7 +89,7 @@
   opacity: 0;
   transform: translateY(10px) scale(0.95);
   visibility: hidden;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
 }
 
 .dropdown-menu.show {
