@@ -1,8 +1,14 @@
 'use strict';
 
 // ─── Detail modal ─────────────────────────────────────────────────
+// Picker instances stored globally for cleanup
+let fromPicker = null;
+let toPicker = null;
+
 function openDetail(pid) {
   state.detailProxyId = pid;
+  state.detailFromTs = null;  // Reset hour selection on open
+  state.detailToTs = null;    // Reset end time on open
   const proxy = state.proxies.find(p => p.id === pid);
   if (!proxy) return;
 
@@ -22,7 +28,12 @@ function openDetail(pid) {
 function closeDetail() {
   document.getElementById('detail-modal').classList.add('hidden');
   state.detailProxyId = null;
+  state.detailFromTs = null;  // Reset hour selection on close
+  state.detailToTs = null;    // Reset end time on close
   if (state.detailChart) { state.detailChart.destroy(); state.detailChart = null; }
+  // Clean up picker instances
+  fromPicker = null;
+  toPicker = null;
 }
 
 function closeDetailIfBg(e) {
@@ -125,6 +136,27 @@ function buildDetailInfoHtml(proxy) {
   </div>` : ''}`;
 }
 
+// Format timestamp for display
+function formatTsRange(fromTs, toTs) {
+  if (!fromTs) return '';
+  const fromDate = new Date(fromTs * 1000);
+  const use12h = state.meta?.time_format === '12h';
+  
+  const formatOpts = { 
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  };
+  if (use12h) formatOpts.hour12 = true;
+  
+  const fromStr = fromDate.toLocaleString(use12h ? 'en-US' : 'en-GB', formatOpts);
+  
+  if (toTs) {
+    const toDate = new Date(toTs * 1000);
+    const toStr = toDate.toLocaleString(use12h ? 'en-US' : 'en-GB', formatOpts);
+    return `${fromStr} → ${toStr}`;
+  }
+  return `From: ${fromStr}`;
+}
+
 function renderDetailHeader(proxy) {
   const ctrlTypes = [];
   if (proxy.tcp_check) ctrlTypes.push('tcp');
@@ -133,6 +165,13 @@ function renderDetailHeader(proxy) {
     `<button class="ctrl-btn ${state.detailCheckType === t ? 'active' : ''}"
        onclick="setDetailType('${t}')">${t.toUpperCase()}</button>`
   ).join('');
+
+  // Time range constraints
+  const now = new Date();
+  const retentionDays = state.meta?.retention_days || 30;
+  const minDate = new Date(now - retentionDays * 24 * 3600 * 1000);
+  
+  const hasRange = state.detailFromTs || state.detailToTs;
 
   // Full build (first open): sets the entire detail-body including chart canvas
   document.getElementById('detail-body').innerHTML = `
@@ -144,7 +183,7 @@ function renderDetailHeader(proxy) {
     ${ctrlTypes.length > 1 ? `<div class="ctrl-group">${typeButtons}</div><span style="color:var(--border);margin:0 4px">|</span>` : ''}
     <div class="ctrl-group" id="hours-ctrl">
       ${[[1, '1h'], [6, '6h'], [24, '24h'], [168, '7d'], [720, '30d']].map(([h, l]) =>
-    `<button class="ctrl-btn ${state.detailHours === h ? 'active' : ''}"
+    `<button class="ctrl-btn ${state.detailHours === h && !hasRange ? 'active' : ''}"
            onclick="setDetailHours(${h})">${l}</button>`
   ).join('')}
     </div>
@@ -155,12 +194,56 @@ function renderDetailHeader(proxy) {
            onclick="setDetailGroupBy('${v}')">${l}</button>`
   ).join('')}
     </div>
+    <div class="hour-selector-wrapper">
+      <div id="from-picker-container"></div>
+      <span class="hour-selector-sep">→</span>
+      <div id="to-picker-container"></div>
+      <button class="ctrl-btn hour-clear-btn ${hasRange ? '' : 'hidden'}" 
+              onclick="clearDetailTimeRange()" 
+              title="Clear time range">✕</button>
+    </div>
   </div>
+  ${hasRange ? `<div class="hour-selector-hint">${formatTsRange(state.detailFromTs, state.detailToTs)}</div>` : ''}
 
   <div class="chart-container" style="height:320px">
     <canvas id="detail-chart-canvas"></canvas>
     <div class="chart-loading" id="chart-loading"><div class="spinner"></div></div>
   </div>`;
+
+  // Initialize custom datetime pickers
+  const use24h = state.meta?.time_format !== '12h';
+  
+  fromPicker = new DatetimePicker({
+    container: document.getElementById('from-picker-container'),
+    value: state.detailFromTs ? new Date(state.detailFromTs * 1000) : null,
+    min: minDate,
+    max: state.detailToTs ? new Date(state.detailToTs * 1000) : now,
+    placeholder: 'Start',
+    title: 'Start time',
+    use24h: use24h,
+    onChange: (date) => {
+      state.detailFromTs = date ? Math.floor(date.getTime() / 1000) : null;
+      // Re-render to update hint and clear button visibility
+      renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {});
+      loadDetailChart();
+    }
+  });
+
+  toPicker = new DatetimePicker({
+    container: document.getElementById('to-picker-container'),
+    value: state.detailToTs ? new Date(state.detailToTs * 1000) : null,
+    min: state.detailFromTs ? new Date(state.detailFromTs * 1000) : minDate,
+    max: now,
+    placeholder: 'End',
+    title: 'End time',
+    use24h: use24h,
+    onChange: (date) => {
+      state.detailToTs = date ? Math.floor(date.getTime() / 1000) : null;
+      // Re-render to update hint and clear button visibility
+      renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {});
+      loadDetailChart();
+    }
+  });
 }
 
 function updateDetailStats() {
@@ -173,9 +256,33 @@ function updateDetailStats() {
   }
 }
 
-function setDetailType(t) { state.detailCheckType = t; renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); loadDetailChart(); }
-function setDetailHours(h) { state.detailHours = h; renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); loadDetailChart(); }
-function setDetailGroupBy(g) { state.detailGroupBy = g; renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); loadDetailChart(); }
+function setDetailType(t) { 
+  state.detailCheckType = t; 
+  renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); 
+  loadDetailChart(); 
+}
+
+function setDetailHours(h) { 
+  state.detailHours = h; 
+  state.detailFromTs = null;  // Clear time range when selecting preset
+  state.detailToTs = null;
+  renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); 
+  loadDetailChart(); 
+}
+
+function setDetailGroupBy(g) { 
+  state.detailGroupBy = g; 
+  renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); 
+  loadDetailChart(); 
+}
+
+// Clear time range selection
+function clearDetailTimeRange() {
+  state.detailFromTs = null;
+  state.detailToTs = null;
+  renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {}); 
+  loadDetailChart();
+}
 
 async function loadDetailChart() {
   if (!state.detailProxyId) return;
@@ -183,9 +290,20 @@ async function loadDetailChart() {
 
   const params = new URLSearchParams({
     proxy_id: state.detailProxyId,
-    hours: state.detailHours,
     group_by: state.detailGroupBy,
   });
+  
+  // If time range is specified, use it; otherwise use hours parameter
+  if (state.detailFromTs) {
+    params.set('from_ts', state.detailFromTs.toString());
+    // Only send to_ts if it's set
+    if (state.detailToTs) {
+      params.set('to_ts', state.detailToTs.toString());
+    }
+  } else {
+    params.set('hours', state.detailHours.toString());
+  }
+  
   const data = await apiFetch(`api/proxy/chart?${params}`);
   document.getElementById('chart-loading')?.classList.add('hidden');
   if (!data) return;
@@ -201,6 +319,7 @@ function renderDetailChart(series) {
   if (state.detailChart) { state.detailChart.destroy(); state.detailChart = null; }
 
   const labels = series.map(d => new Date(d.ts * 1000));
+  const timestamps = series.map(d => d.ts);  // Keep timestamps for click handling
   const successes = series.map(d => d.successes);
   const failures = series.map(d => d.failures);
   const latencies = series.map(d => d.avg_latency);
@@ -293,6 +412,42 @@ function renderDetailChart(series) {
           bodyColor: colorText,
           padding: 10,
         },
+      },
+      onClick: (event, elements, chart) => {
+        // Handle click on chart elements
+        if (elements.length === 0) return;
+        
+        const element = elements[0];
+        const datasetIndex = element.datasetIndex;
+        
+        // Only respond to clicks on bar charts (Success/Failures), not line chart
+        if (datasetIndex > 1) return;
+        
+        const index = element.index;
+        const clickedTs = timestamps[index];
+        
+        // Only enable drill-down when in 'hour' mode
+        if (state.detailGroupBy === 'hour') {
+          // Calculate the end of the clicked hour (hour bucket + 1 hour)
+          const hourStart = clickedTs;
+          const hourEnd = clickedTs + 3600;  // +1 hour
+          
+          // Set time range to exactly 1 hour
+          state.detailFromTs = hourStart;
+          state.detailToTs = hourEnd;
+          // Switch to minute view to see the hour in detail
+          state.detailGroupBy = 'minute';
+          renderDetailHeader(state.proxies.find(p => p.id === state.detailProxyId) || {});
+          loadDetailChart();
+        }
+      },
+      // Make cursor indicate clickable bars when in hour mode
+      onHover: (event, elements, chart) => {
+        if (state.detailGroupBy === 'hour' && elements.length > 0 && elements[0].datasetIndex <= 1) {
+          event.native.target.style.cursor = 'pointer';
+        } else {
+          event.native.target.style.cursor = 'default';
+        }
       },
     },
   });

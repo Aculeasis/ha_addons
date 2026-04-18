@@ -366,12 +366,15 @@ class Storage:
         proxy_id: str,
         hours: int = 24,
         group_by: str = "hour",
+        from_ts: Optional[int] = None,
+        to_ts: Optional[int] = None,
     ) -> Dict[str, List[Dict]]:
         if not self._db:
             raise RuntimeError("Database not initialized")
 
         now = int(time.time())
-        from_ts = now - hours * 3600
+        from_ts = from_ts if from_ts is not None else now - hours * 3600
+        to_ts = to_ts if to_ts is not None else now
         interval = {"minute": 60, "hour": 3600, "day": 86400}.get(group_by, 3600)
 
         proxy_fk = await self._get_proxy_fk(proxy_id)
@@ -385,11 +388,11 @@ class Storage:
                    MIN(latency_ms)      AS min_lat,
                    MAX(latency_ms)      AS max_lat
             FROM proxy_checks
-            WHERE proxy_fk = ? AND timestamp >= ?
+            WHERE proxy_fk = ? AND timestamp >= ? AND timestamp < ?
             GROUP BY check_type, bucket
             ORDER BY bucket ASC
             """,
-            (interval, interval, proxy_fk, from_ts),
+            (interval, interval, proxy_fk, from_ts, to_ts),
         ) as cur:
             rows = await cur.fetchall()
 

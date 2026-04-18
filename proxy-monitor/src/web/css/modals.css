@@ -90,6 +90,93 @@
   position: relative;
 }
 
+/* Hour selector */
+.hour-selector-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+}
+
+.hour-selector-input {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  padding: 5px 8px;
+  font: 12px 'Inter', sans-serif;
+  cursor: pointer;
+  transition: border-color var(--t);
+  outline: none;
+  width: 130px;
+}
+
+.hour-selector-input:focus {
+  border-color: var(--accent);
+}
+
+.hour-selector-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+}
+
+.hour-selector-sep {
+  color: var(--text3);
+  font-size: 12px;
+  user-select: none;
+}
+
+.hour-clear-btn {
+  padding: 5px 8px !important;
+  font-size: 14px !important;
+  line-height: 1;
+}
+
+.hour-selector-hint {
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  background: rgba(91, 138, 245, 0.1);
+  border-radius: var(--radius-xs);
+  display: inline-block;
+}
+
+/* Mobile adjustments for hour selector */
+@media (max-width: 700px) {
+  .chart-controls {
+    gap: 6px;
+  }
+  
+  .hour-selector-wrapper {
+    flex-basis: 100%;
+    margin-left: 0;
+    margin-top: 4px;
+    justify-content: flex-start;
+  }
+  
+  .hour-selector-input {
+    width: 110px;
+  }
+}
+
+@media (max-width: 400px) {
+  .ctrl-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  
+  .hour-selector-input {
+    width: 95px;
+    font-size: 11px;
+    padding: 4px 6px;
+  }
+  
+  .hour-selector-sep {
+    font-size: 11px;
+  }
+}
+
 .chart-loading {
   position: absolute;
   inset: 0;

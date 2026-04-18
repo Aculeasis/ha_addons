@@ -13,6 +13,8 @@ const state = {
   detailGroupBy: 'hour',
   detailCheckType: 'tcp',
   detailChart: null,
+  detailFromTs: null,  // Specific timestamp to start from (null = use last N hours)
+  detailToTs: null,    // Specific timestamp to end at (null = use now)
   editingProxyIndex: null,
   pendingConfig: null,
   dbSizeFormatted: null,

@@ -419,6 +419,7 @@ async def _all_stats() -> Dict[str, Any]:
             "window_minutes": window,
             "check_interval": config.get("monitoring", {}).get("check_interval_seconds", 60),
             "time_format": config.get("server", {}).get("time_format", "24h"),
+            "retention_days": config.get("storage", {}).get("retention_days", 30),
         },
     }
 
@@ -549,9 +550,11 @@ async def api_chart(
     proxy_id: str,
     hours: int = 24,
     group_by: str = "hour",
+    from_ts: Optional[int] = None,
+    to_ts: Optional[int] = None,
     _: None = Depends(_require_auth),
 ) -> Dict:
-    return await storage.get_chart_data(proxy_id, hours=hours, group_by=group_by)  # type: ignore[union-attr]
+    return await storage.get_chart_data(proxy_id, hours=hours, group_by=group_by, from_ts=from_ts, to_ts=to_ts)
 
 
 # ------------------------------------------------------------------ #
