@@ -210,8 +210,23 @@ async def _require_auth(request: Request) -> None:
 
 
 # ------------------------------------------------------------------ #
-#  Check / cleanup loops                                              #
+#  Check / cleanup                                                   #
 # ------------------------------------------------------------------ #
+
+async def _db_cleanup() -> None:
+    if storage:
+        # Sync proxies: remove those that are no longer in the config
+        configured_ids = [get_proxy_id(p) for p in config.get("proxies", [])]
+        await storage.sync_proxies(configured_ids)
+
+        # Cleanup old data based on retention setting
+        retention = config.get("storage", {}).get("retention_days", 30)
+        await storage.cleanup_old_data(retention)
+
+        await storage.vacuum()
+    else:
+        raise RuntimeError("Storage not initialized")
+
 
 async def _run_checks() -> None:
     """Main check loop using cached monitoring settings."""
@@ -296,14 +311,7 @@ async def _run_cleanup() -> None:
         except asyncio.CancelledError:
             return
         try:
-            if storage:
-                # Sync proxies: remove those that are no longer in the config
-                configured_ids = [get_proxy_id(p) for p in config.get("proxies", [])]
-                await storage.sync_proxies(configured_ids)
-
-                # Cleanup old data
-                retention = config.get("storage", {}).get("retention_days", 30)
-                await storage.cleanup_old_data(retention)
+            await _db_cleanup()
         except Exception as exc:
             logger.error("Cleanup error: %s", exc)
 
@@ -611,18 +619,8 @@ async def api_db_size(_: None = Depends(_require_auth)) -> Dict:
 @app.post("/api/db-vacuum")
 async def api_db_vacuum(_: None = Depends(_require_auth)) -> Dict:
     try:
-        if storage:
-            # Sync proxies: remove those that are no longer in the config
-            configured_ids = [get_proxy_id(p) for p in config.get("proxies", [])]
-            await storage.sync_proxies(configured_ids)
-
-            # Cleanup old data based on retention setting
-            retention = config.get("storage", {}).get("retention_days", 30)
-            await storage.cleanup_old_data(retention)
-
-            await storage.vacuum()
-            return {"status": "ok", "message": "Database optimized successfully"}
-        raise HTTPException(status_code=500, detail="Storage not initialized")
+        await _db_cleanup()
+        return {"status": "ok", "message": "Database optimized successfully"}
     except Exception as exc:
         logger.error("Vacuum error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))

@@ -426,10 +426,8 @@ class Storage:
         deleted = cur.rowcount
 
         if deleted:
-            # VACUUM reclaims unused disk space. It cannot run in a transaction.
-            await self._db.execute("VACUUM")
             logger.warning(
-                "Cleaned %d old records (retention=%dd) and vacuumed database",
+                "Cleaned %d old records (retention=%dd)",
                 deleted, retention_days
             )
         return deleted
