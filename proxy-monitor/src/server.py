@@ -213,17 +213,18 @@ async def _require_auth(request: Request) -> None:
 #  Check / cleanup                                                   #
 # ------------------------------------------------------------------ #
 
-async def _db_cleanup() -> None:
+async def _db_cleanup(force_vacuum: bool = False) -> None:
     if storage:
         # Sync proxies: remove those that are no longer in the config
         configured_ids = [get_proxy_id(p) for p in config.get("proxies", [])]
-        await storage.sync_proxies(configured_ids)
+        result1 = await storage.sync_proxies(configured_ids)
 
         # Cleanup old data based on retention setting
         retention = config.get("storage", {}).get("retention_days", 30)
-        await storage.cleanup_old_data(retention)
+        result2 = await storage.cleanup_old_data(retention)
 
-        await storage.vacuum()
+        if result1 or result2 or force_vacuum:
+            await storage.vacuum()
     else:
         raise RuntimeError("Storage not initialized")
 
@@ -619,7 +620,7 @@ async def api_db_size(_: None = Depends(_require_auth)) -> Dict:
 @app.post("/api/db-vacuum")
 async def api_db_vacuum(_: None = Depends(_require_auth)) -> Dict:
     try:
-        await _db_cleanup()
+        await _db_cleanup(force_vacuum=True)
         return {"status": "ok", "message": "Database optimized successfully"}
     except Exception as exc:
         logger.error("Vacuum error: %s", exc)
