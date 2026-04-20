@@ -46,8 +46,7 @@ options:
     interval: 30
     threshold: 6
     pause: 30
-    test_host: "1.1.1.1"
-    test_port: 80
+    test_url: "http://1.1.1.1"
 
 schema:
   mode: "list(normal|login|locations|reinstall|logout)"
@@ -69,5 +68,4 @@ schema:
     interval: "int(10,3600)"
     threshold: "int(1,100)"
     pause: "int(1,1440)"
-    test_host: "str"
-    test_port: "port"
+    test_url: "str"

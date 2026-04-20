@@ -23,23 +23,14 @@ check_proxy() {
     local port="$2"
     local user="$3"
     local pass="$4"
-    local test_host="$5"
-    local test_port="$6"
-    local timeout="${7:-10}"
+    local test_url="$5"
+    local timeout="${6:-10}"
 
     # Use curl to test SOCKS5 connection
     if curl -s -o /dev/null -w "" \
         -x "socks5h://${user}:${pass}@${host}:${port}" \
         --connect-timeout "$timeout" \
-        "http://${test_host}:${test_port}/" 2>/dev/null; then
-        return 0
-    fi
-
-    # Alternative: try HTTPS through proxy
-    if curl -s -o /dev/null -w "" \
-        -x "socks5h://${user}:${pass}@${host}:${port}" \
-        --connect-timeout "$timeout" \
-        "https://api.ipify.org" 2>/dev/null; then
+        "$test_url" 2>/dev/null; then
         return 0
     fi
 
@@ -60,8 +51,7 @@ main() {
     local interval=$(bashio::config 'watchdog.interval')
     local threshold=$(bashio::config 'watchdog.threshold')
     local pause=$(bashio::config 'watchdog.pause')
-    local test_host=$(bashio::config 'watchdog.test_host')
-    local test_port=$(bashio::config 'watchdog.test_port')
+    local test_url=$(bashio::config 'watchdog.test_url')
 
     # Set defaults if empty
     socks_port="${socks_port:-5004}"
@@ -70,15 +60,14 @@ main() {
     interval="${interval:-30}"
     threshold="${threshold:-6}"
     pause="${pause:-30}"
-    test_host="${test_host:-1.1.1.1}"
-    test_port="${test_port:-80}"
+    test_url="${test_url:-http://1.1.1.1}"
 
     bashio::log.info "Configuration:"
     bashio::log.info "  SOCKS Port: $socks_port"
     bashio::log.info "  Check Interval: ${interval}s"
     bashio::log.info "  Failure Threshold: $threshold"
     bashio::log.info "  Pause after restart: ${pause}m"
-    bashio::log.info "  Test Host: ${test_host}:${test_port}"
+    bashio::log.info "  Test URL: $test_url"
 
     local failure_count=0
 
@@ -86,7 +75,7 @@ main() {
 
     while true; do
         # Check proxy
-        if check_proxy "127.0.0.1" "$socks_port" "$socks_user" "$socks_pass" "$test_host" "$test_port"; then
+        if check_proxy "127.0.0.1" "$socks_port" "$socks_user" "$socks_pass" "$test_url"; then
             # Success
             if [ $failure_count -gt 0 ]; then
                 bashio::log.info "Proxy recovered. Resetting failure count (was $failure_count)"

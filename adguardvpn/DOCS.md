@@ -70,8 +70,7 @@ Auto-restarts VPN if proxy becomes unresponsive.
 | Check Interval | 30s | Health check frequency |
 | Failure Threshold | 6 | Failures before restart |
 | Pause After Restart | 30m | Cooldown period |
-| Test Host | 1.1.1.1 | Connection test host |
-| Test Port | 80 | Connection test port |
+| Test URL | http://1.1.1.1 | URL for connection test |
 
 ## Troubleshooting
 
