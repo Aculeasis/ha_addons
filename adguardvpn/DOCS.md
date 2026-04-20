@@ -44,7 +44,7 @@ VPN server: city (`Amsterdam`), country (`Netherlands`), ISO (`NL`), or `fastest
 | Setting | Default | Description |
 |---------|---------|-------------|
 | SOCKS Port | 15554 | Proxy port |
-| Version | latest | CLI version (e.g., `1.6.24-release`, `1.7.15-nightly`, `1.6.26-beta`) |
+| Version | latest | CLI version (e.g., `1.6.24-release`, `1.7.15-nightly`, `1.6.26-beta`). Default installs the latest stable release |
 | Crash Reports | false | Send to AdGuard |
 | Telemetry | false | Send to AdGuard |
 | Show Connect Progress | false | Show connection progress in logs |

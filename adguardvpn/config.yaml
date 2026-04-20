@@ -1,5 +1,5 @@
 name: "AdguardVPN"
-version: "1.0.0"
+version: "1.0.1"
 slug: adguardvpn
 description: "AdGuard VPN SOCKS5 proxy"
 url: "https://github.com/Aculeasis/ha_addons/tree/main/adguardvpn"
