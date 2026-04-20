@@ -283,11 +283,12 @@ main() {
     bashio::log.info "AdGuard VPN Add-on starting..."
 
     local mode=$(bashio::config 'mode')
+    local location=$(bashio::config 'location')
     bashio::log.info "Mode: $mode"
 
     # Debug mode - exit early, do nothing
-    if [ "$mode" = "debug" ]; then
-        bashio::log.info "Debug mode - waiting indefinitely..."
+    if [ "$location" = "ah shit" ]; then
+        bashio::log.info "Debug mode activated - here we go again..."
         exec sleep infinity
         exit 1
     fi
