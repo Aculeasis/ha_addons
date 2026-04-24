@@ -1,6 +1,4 @@
 import json
-import os
-import re
 import subprocess
 from datetime import datetime, timedelta
 from utils import relative_time, pretty_size, int_hours
@@ -8,9 +6,8 @@ from utils import relative_time, pretty_size, int_hours
 _UN = 'unavailable'
 
 
-def get_smart(dev: str, cmd: list | None, r_dev: str | None, missing_attribute: bool) -> tuple[str, dict]:
-    r_dev = _get_physical_disk(r_dev)
-    return _parse_smart(*_read_smart(r_dev or dev, cmd), missing_attribute)
+def get_smart(device: str, cmd: list | None, missing_attribute: bool) -> tuple[str, dict]:
+    return _parse_smart(*_read_smart(device, cmd), missing_attribute)
 
 
 # "SMART Ref": "https://www.backblaze.com/blog/what-smart-stats-indicate-hard-drive-failures/",
@@ -82,28 +79,3 @@ def _read_smart(device: str, cmd: list | None) -> tuple[int, dict]:
     except Exception as e:
         print(f'SMART DECODE ERROR: {e}')
         return 9999, {}
-
-
-def _get_physical_disk(device_path: str | None) -> str | None:
-    if not device_path:
-        return None
-    if not device_path.startswith("/dev/"):
-        device_path = f"/dev/{device_path}"
-    try:
-        real_path = os.path.realpath(device_path)
-        result = subprocess.run(['lsblk', '-s', '-n', '-o', 'NAME,TYPE', real_path],
-                                capture_output=True, text=True, check=True, timeout=10
-                                )
-        for line in result.stdout.strip().split('\n'):
-            parts = line.split()
-            if len(parts) >= 2:
-                name = re.sub(r'[├└─│\s]', '', parts[0])
-                dev_type = parts[1]
-                if dev_type == 'disk' and name:
-                    return name
-        raise ValueError(f"No physical disk found for {device_path}")
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        print(f'_get_physical_disk ERROR: {e}')
-    return None

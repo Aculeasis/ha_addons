@@ -86,7 +86,7 @@ class RemoteSMART(threading.Thread):
     def _send_data(self, is_init=False):
         for device, value in self.cfg['devices'].items():
             for topic, data in mqtt_adapters.publish(
-                    *get_smart(device, value.get('cmd'), value.get('dev'), self.cfg['missing_attribute']), value
+                    *get_smart(value['dev'], value.get('cmd'), self.cfg['missing_attribute']), value
             ):
                 self.conn.publish(topic, data, qos=int(is_init), retain=is_init)
 

@@ -2,10 +2,12 @@ import signal
 import threading
 import time
 import os
+import subprocess
 from datetime import datetime
 
 import yaml
 import json
+import re
 
 MQTT = {
     'host': os.getenv('MQTT_HOST'),
@@ -43,6 +45,7 @@ def read_config(file: str) -> dict:
             raise RuntimeError(f'cmd has to be list or none, get {type(cmd)} for {key}')
         if value['id'] in ids:
             raise RuntimeError(f'ID: `{value["id"]}` duplicated. ID MUST BE unique')
+        value['dev'] = _get_physical_disk(value.get('dev')) or key
         ids.add(value['id'])
     return inject_env(data)
 
@@ -52,6 +55,32 @@ def inject_env(data: dict) -> dict:
         for k, v in MQTT.items():
             data['mqtt'][k] = v or data['mqtt'].get(k, v)
     return data
+
+
+def _get_physical_disk(device_path: str | None) -> str | None:
+    if not device_path:
+        return None
+    if not device_path.startswith("/dev/"):
+        device_path = f"/dev/{device_path}"
+    try:
+        real_path = os.path.realpath(device_path)
+        result = subprocess.run(['lsblk', '-s', '-n', '-o', 'NAME,TYPE', real_path],
+                                capture_output=True, text=True, check=True, timeout=10
+                                )
+        for line in result.stdout.strip().split('\n'):
+            parts = line.split()
+            if len(parts) >= 2:
+                name = re.sub(r'[├└─│\s]', '', parts[0])
+                dev_type = parts[1]
+                if dev_type == 'disk' and name:
+                    return name
+        raise ValueError(f"No physical disk found for {device_path}")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f'_get_physical_disk ERROR: {e}')
+    return None
+
 
 
 class SignalHandler:

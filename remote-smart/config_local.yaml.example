@@ -1,0 +1,26 @@
+mqtt:
+  host: 127.0.0.1
+  port: 1883
+  username: user
+  password: pass
+update_interval: 600
+missing_attribute: True
+devices:
+  sda:
+    id: ssda
+    name: 'UBUNTU HDD (F)-4TB'
+  sdb:
+    id: ssdb
+    name: 'UBUNTU SSD (/)-60GB'
+  sdc:
+    id: ssdc
+    name: 'UBUNTU HDD (G)-3TB'
+  sdd:
+    id: ssdd
+    name: 'UBUNTU HDD (1)-1TB'
+  sde:
+    id: ssde
+    name: 'UBUNTU HDD (E)-2TB'
+#  sda:
+#    id: sda
+#    name: 'ULOCAL SSD (/)-250GB'
