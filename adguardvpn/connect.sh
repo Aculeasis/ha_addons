@@ -95,6 +95,24 @@ connect_vpn() {
             status=$($CLI_PATH status </dev/null 2>/dev/null | head -1 || echo "Unknown")
             bashio::log.notice "VPN Status: $status"
 
+            # Detect external IP through SOCKS proxy
+            local socks_port=$(bashio::config 'adguard.socks_port')
+            local socks_user=$(bashio::config 'auth.socks_user')
+            local socks_pass=$(bashio::config 'auth.socks_pass')
+            local external_ip
+
+            for i in 1 2 3; do
+                external_ip=$(curl -s --connect-timeout 10 \
+                    -x "socks5h://$socks_user:$socks_pass@127.0.0.1:$socks_port" \
+                    "https://ifconfig.me/ip" 2>/dev/null)
+                [ -n "$external_ip" ] && [ "$external_ip" != "unknown" ] && break
+                bashio::log.info "Waiting for VPN tunnel... (attempt $i)"
+                sleep 3
+            done
+            [ -z "$external_ip" ] && external_ip="unknown"
+
+            bashio::log.notice "External IP: $external_ip"
+
             return 0
         fi
 
