@@ -138,8 +138,10 @@ class ProxyChecker:
         }
         sock = socks.socksocket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            sock.set_proxy(socks.SOCKS5, host, port, username=user, password=pwd)
+            # Set timeout BEFORE set_proxy so the SOCKS5 TCP handshake
+            # (done internally by PySocks) is also bounded by this timeout.
             sock.settimeout(timeout)
+            sock.set_proxy(socks.SOCKS5, host, port, username=user, password=pwd)
             start_time = time.perf_counter()
             try:
                 sock.sendto(dns_query, ("1.1.1.1", 53))
@@ -163,8 +165,24 @@ class ProxyChecker:
 
     async def check_udp(self, proxy: Dict) -> Dict[str, Any]:
         """Check UDP connectivity through the SOCKS5 proxy via DNS query."""
+        timeout = self._get_timeout()
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, self._check_udp_sync, proxy)
+        try:
+            # asyncio.wait_for enforces a hard deadline at the event-loop level.
+            # Without it, run_in_executor has no cancellation: a blocked thread
+            # keeps occupying the ThreadPoolExecutor slot even after socket.timeout
+            # fires internally, starving the pool and causing queue buildup.
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, self._check_udp_sync, proxy),
+                timeout=timeout + 2,  # +2s grace over the socket-level timeout
+            )
+        except asyncio.TimeoutError:
+            result = {
+                "success": False,
+                "latency_ms": round(timeout * 1000),
+                "external_ip": None,
+                "error": "Timeout",
+            }
         return result
 
     # ------------------------------------------------------------------ #
