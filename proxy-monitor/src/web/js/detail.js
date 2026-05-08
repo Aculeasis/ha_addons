@@ -88,7 +88,9 @@ function buildDetailInfoHtml(proxy) {
   const lc = proxy.stats?.last_checks || {};
   const tot = proxy.stats?.total || {};
   const primaryLc = lc[state.detailCheckType] || lc.tcp || lc.udp;
-  const lat = primaryLc?.latency_ms;
+  const lat = primaryLc?.latency_ms ?? null;
+  const latDisplay = (lat !== null && lat !== undefined) ? fmtLatency(lat) : 'NaN';
+  const latCls = (lat !== null && lat !== undefined) ? latencyClass(lat) : 'lat-none';
   const ipStr = proxy.external_ip || '—';
   const tcpTotal = tot.tcp ? `${tot.tcp.success}/${tot.tcp.total} (${successRate(tot.tcp)}%)` : '—';
   const udpTotal = tot.udp ? `${tot.udp.success}/${tot.udp.total} (${successRate(tot.udp)}%)` : '—';
@@ -116,7 +118,7 @@ function buildDetailInfoHtml(proxy) {
   </div>
   <div class="detail-info-block">
     <div class="dib-label">Latency</div>
-    <div class="dib-value ${latencyClass(lat)}">${fmtLatency(lat)}</div>
+    <div class="dib-value ${latCls}">${latDisplay}</div>
   </div>
   ${proxy.tcp_check ? `<div class="detail-info-block">
     <div class="dib-label">TCP checks</div>
@@ -363,6 +365,7 @@ function renderDetailChart(series) {
           tension: 0.3,
           order: 1,
           fill: false,
+          spanGaps: false, // null values (failed pings) render as gaps, not connected
         },
       ],
     },

@@ -143,28 +143,34 @@ const _latTip = (() => {
   return el;
 })();
 
-function _tipRow(label, val, color = '') {
+function _tipRow(label, val, color = '', nanText = '—') {
   const v = val !== null && val !== undefined && !isNaN(val)
-    ? fmtLatency(val) : '—';
+    ? fmtLatency(val) : nanText;
   return `<div style="display:flex;justify-content:space-between;gap:24px;line-height:1.9">
     <span style="color:#8888a8">${label}</span>
     <span style="${color ? 'color:' + color : ''}">${v}</span></div>`;
 }
 
 function showLatTip(badge, e) {
-  const last = parseFloat(badge.dataset.last) || null;
-  const avg = parseFloat(badge.dataset.avg) || null;
-  const min = parseFloat(badge.dataset.min) || null;
-  const max = parseFloat(badge.dataset.max) || null;
+  const last = badge.dataset.last !== '' ? parseFloat(badge.dataset.last) : null;
+  const avg  = badge.dataset.avg  !== '' ? parseFloat(badge.dataset.avg)  : null;
+  const min  = badge.dataset.min  !== '' ? parseFloat(badge.dataset.min)  : null;
+  const max  = badge.dataset.max  !== '' ? parseFloat(badge.dataset.max)  : null;
   const label = badge.dataset.label || '';
   const wm = state.meta?.window_minutes || 5;
+  // If we have no valid window values at all, show NaN for the window rows
+  const hasWindowData = avg !== null && !isNaN(avg);
+  const nanLabel = 'NaN';
+  // Last is also NaN when null (no successful ping ever recorded / all recent failed)
+  const lastText = last !== null ? fmtLatency(last) : 'NaN';
   _latTip.innerHTML = `
     <div style="font-weight:700;color:var(--accent);font-size:13px;margin-bottom:8px">${label} Latency</div>
-    ${_tipRow('Last', last)}
+    <div style="display:flex;justify-content:space-between;gap:24px;line-height:1.9">
+      <span style="color:#8888a8">Last</span><span>${lastText}</span></div>
     <div style="border-top:1px solid rgba(255,255,255,0.07);margin:5px 0"></div>
-    ${_tipRow(`Avg (${wm}m window)`, avg)}
-    ${_tipRow('Min', min, '#12d88a')}
-    ${_tipRow('Max', max, '#f5a840')}`;
+    ${_tipRow(`Avg (${wm}m window)`, avg, '', hasWindowData ? '—' : nanLabel)}
+    ${_tipRow('Min', min, '#12d88a', hasWindowData ? '—' : nanLabel)}
+    ${_tipRow('Max', max, '#f5a840', hasWindowData ? '—' : nanLabel)}`;
   _latTip.style.display = 'block';
   _positionTip(e);
 }
@@ -207,6 +213,12 @@ function successRate(stats) {
 function buildSparklineSvg(tcp, udp) {
   // Gradient defs moved to global SVG sprite in index.html
   const W = 300, H = 40, pad = 2;
+
+  /**
+   * Build sparkline path data.
+   * avg_latency may be null (failed check) — those points are skipped so the
+   * line has a visible gap instead of connecting through the failure.
+   */
   const build = (data) => {
     if (!data || data.length < 2) return null;
     const rates = data.map(d => {
@@ -216,7 +228,23 @@ function buildSparklineSvg(tcp, udp) {
     const step = (W - 2 * pad) / (rates.length - 1);
     const pts = rates.map((r, i) => `${pad + i * step},${H - pad - r * (H - 2 * pad)}`).join(' ');
     const fill = `${pts} ${pad + (rates.length - 1) * step},${H} ${pad},${H}`;
-    return { pts, fill };
+
+    // Build segmented polyline paths for latency, skipping null values
+    // Each continuous run of non-null points becomes its own <polyline> segment
+    const latSegs = [];
+    let seg = [];
+    data.forEach((d, i) => {
+      const lat = d.avg_latency;
+      if (lat !== null && lat !== undefined) {
+        seg.push(`${pad + i * step},${H - pad - Math.min(lat / 2000, 1) * (H - 2 * pad)}`);
+      } else {
+        if (seg.length > 1) latSegs.push(seg.join(' '));
+        seg = [];
+      }
+    });
+    if (seg.length > 1) latSegs.push(seg.join(' '));
+
+    return { pts, fill, latSegs };
   };
 
   const t = build(tcp);
@@ -279,12 +307,15 @@ function renderStatBlock(label, stats, windowStats) {
 function latBadgeHtml(label, lat, winStats) {
   const w = winStats || {};
   const color = label === 'TCP' ? 'var(--accent)' : (label === 'UDP' ? 'var(--accent2)' : 'var(--text3)');
+  // Show 'NaN' when latency is null (all recent checks failed)
+  const latText = (lat !== null && lat !== undefined) ? fmtLatency(lat) : 'NaN';
+  const latCls = (lat !== null && lat !== undefined) ? latencyClass(lat) : 'lat-none';
   return `<div class="lat-entry">
     <span class="lat-label" style="color:${color};cursor:pointer">${label}</span>
-    <span class="stat-latency ${latencyClass(lat)}"
+    <span class="stat-latency ${latCls}"
           data-last="${lat ?? ''}" data-avg="${w.lat_avg ?? ''}"
           data-min="${w.lat_min ?? ''}" data-max="${w.lat_max ?? ''}"
-          data-label="${label}" style="cursor:pointer">${fmtLatency(lat)}</span>
+          data-label="${label}" style="cursor:pointer">${latText}</span>
   </div>`;
 }
 
@@ -319,13 +350,17 @@ function updateCard(el, proxy) {
   const udpLat = lc.udp?.latency_ms ?? null;
 
   const latEntries = [];
-  if (proxy.tcp_check && tcpLat != null) latEntries.push(latBadgeHtml('TCP', tcpLat, win.tcp));
-  if (proxy.udp_check && udpLat != null) latEntries.push(latBadgeHtml('UDP', udpLat, win.udp));
+  // Always show badge when protocol is enabled — null latency renders as 'NaN'
+  if (proxy.tcp_check) latEntries.push(latBadgeHtml('TCP', tcpLat, win.tcp));
+  if (proxy.udp_check) latEntries.push(latBadgeHtml('UDP', udpLat, win.udp));
   const latCol = latEntries.length
     ? `<div class="card-lat">${latEntries.join('')}</div>` : '';
 
   const tags = (proxy.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
-  const sparkSvg = buildSparklineSvg(spark.tcp, spark.udp);
+  const sparkSvg = buildSparklineSvg(
+    proxy.tcp_check ? spark.tcp : null,
+    proxy.udp_check ? spark.udp : null,
+  );
 
   const tcpBlock = proxy.tcp_check ? renderStatBlock('TCP', total.tcp, win.tcp) : '';
   const udpBlock = proxy.udp_check ? renderStatBlock('UDP', total.udp, win.udp) : '';

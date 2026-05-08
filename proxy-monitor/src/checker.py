@@ -108,10 +108,11 @@ class ProxyChecker:
 
         except Exception as exc:
             # This catch handles connection errors (proxy down, timeout, etc.)
-            latency = (time.monotonic() - start) * 1000
+            # We do NOT record the elapsed time — it would just be the timeout
+            # value and is misleading. Store NULL instead so graphs show a gap.
             return {
                 "success": False,
-                "latency_ms": round(latency, 2),
+                "latency_ms": None,
                 "external_ip": None,
                 "error": _format_error(exc),
             }
@@ -143,11 +144,10 @@ class ProxyChecker:
             sock.settimeout(timeout)
             sock.set_proxy(socks.SOCKS5, host, port, username=user, password=pwd)
             start_time = time.perf_counter()
-            try:
-                sock.sendto(dns_query, ("1.1.1.1", 53))
-                data, _ = sock.recvfrom(512)
-            finally:
-                result["latency_ms"] = round((time.perf_counter() - start_time) * 1000, 2)
+            sock.sendto(dns_query, ("1.1.1.1", 53))
+            data, _ = sock.recvfrom(512)
+            # Only record latency on success — failed pings store NULL
+            result["latency_ms"] = round((time.perf_counter() - start_time) * 1000, 2)
             result["success"] = True
 
             # DNS TXT record format: <length byte><text data>
@@ -179,7 +179,7 @@ class ProxyChecker:
         except asyncio.TimeoutError:
             result = {
                 "success": False,
-                "latency_ms": round(timeout * 1000),
+                "latency_ms": None,
                 "external_ip": None,
                 "error": "Timeout",
             }
@@ -208,7 +208,7 @@ class ProxyChecker:
             if isinstance(res, Exception):
                 results[ct] = {
                     "success": False,
-                    "latency_ms": 0.0,
+                    "latency_ms": None,
                     "external_ip": None,
                     "error": _format_error(res),
                 }
