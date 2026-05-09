@@ -66,7 +66,7 @@ function buildSettingsHtml(cfg) {
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       Monitoring
     </h3>
-    <div class="form-grid">
+    <div class="form-grid form-grid-4">
       <div class="form-group">
         <label>Check interval (sec)</label>
         <input type="number" id="cfg-check-interval" value="${m.check_interval_seconds || 60}" min="5" />
@@ -83,9 +83,13 @@ function buildSettingsHtml(cfg) {
         <label>Dashboard window (min)</label>
         <input type="number" id="cfg-window" value="${m.recent_window_minutes || 5}" min="1" />
       </div>
-      <div class="form-group" style="grid-column:1/-1">
+      <div class="form-group" style="grid-column:span 2">
         <label>TCP test URL</label>
         <input type="url" id="cfg-test-url" value="${esc(m.tcp_test_url || 'http://httpbin.org/ip')}" />
+      </div>
+      <div class="form-group" style="grid-column:span 2">
+        <label>UDP test IP <span style="opacity:0.55;font-weight:normal;font-size:11px">(IPv4 or IPv4:port)</span></label>
+        <input type="text" id="cfg-udp-test-ip" value="${esc(m.udp_test_ip || '1.1.1.1:53')}" placeholder="1.1.1.1:53" />
       </div>
     </div>
   </div>
@@ -191,6 +195,7 @@ function collectConfig() {
     concurrent_checks: parseInt(document.getElementById('cfg-concurrent')?.value || '10'),
     recent_window_minutes: parseInt(document.getElementById('cfg-window')?.value || '5'),
     tcp_test_url: document.getElementById('cfg-test-url')?.value || 'http://httpbin.org/ip',
+    udp_test_ip: document.getElementById('cfg-udp-test-ip')?.value.trim() || '1.1.1.1:53',
   };
   cfg.storage = {
     ...cfg.storage,
@@ -201,7 +206,35 @@ function collectConfig() {
   return cfg;
 }
 
+function _isValidIPv4(ip) {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) &&
+    ip.split('.').every(n => parseInt(n) >= 0 && parseInt(n) <= 255);
+}
+
+function _isValidUdpAddr(val) {
+  // Accept "ip" or "ip:port"
+  const parts = val.split(':');
+  if (parts.length === 1) return _isValidIPv4(parts[0]);
+  if (parts.length === 2) {
+    const port = parseInt(parts[1]);
+    return _isValidIPv4(parts[0]) && !isNaN(port) && port >= 1 && port <= 65535;
+  }
+  return false;
+}
+
 async function saveSettings() {
+  // Validate UDP test IP (ip or ip:port) before sending
+  const udpIpEl = document.getElementById('cfg-udp-test-ip');
+  if (udpIpEl) {
+    const ipVal = udpIpEl.value.trim();
+    if (!_isValidUdpAddr(ipVal)) {
+      udpIpEl.classList.add('invalid');
+      udpIpEl.addEventListener('input', () => udpIpEl.classList.remove('invalid'), { once: true });
+      toast('error', 'UDP test address must be a valid IPv4 or IPv4:port (e.g. 1.1.1.1:53)');
+      return;
+    }
+  }
+
   const cfg = collectConfig();
   const res = await apiFetch('api/config', 'POST', cfg);
   if (res) {

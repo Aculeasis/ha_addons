@@ -222,6 +222,26 @@
   gap: 14px;
 }
 
+.form-grid-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.form-grid-4 .form-group {
+  min-width: 0;
+}
+
+.form-grid-4 .form-group input,
+.form-grid-4 .form-group select {
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+@media (max-width: 600px) {
+  .form-grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 .form-group {
   display: flex;
   flex-direction: column;
