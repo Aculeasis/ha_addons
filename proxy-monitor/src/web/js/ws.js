@@ -22,7 +22,9 @@ function connectWebSocket() {
     state.wsConnected = true; wsDelay = 1000;
     document.getElementById('ws-dot').className = 'ws-dot connected';
     clearTimeout(wsTimer);
-    ws.send(JSON.stringify({ type: 'auth', token: state.sessionToken }));
+    try {
+      ws.send(JSON.stringify({ type: 'auth', token: state.sessionToken }));
+    } catch {} 
 
     // Start keepalive interval (clean up previous one first)
     clearInterval(keepaliveInterval);

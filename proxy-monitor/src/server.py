@@ -646,7 +646,7 @@ async def api_save_config(
         check_task.cancel()
         try:
             await check_task
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, Exception):
             pass
     check_task = asyncio.create_task(_run_checks())
     await _broadcast_stats()
