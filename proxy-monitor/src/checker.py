@@ -107,20 +107,38 @@ class ProxyChecker:
                     # If we got a response, the proxy is alive.
                     # We try to parse the IP, but if we can't, it's still a "success" (alive).
                     try:
-                        data = await resp.json(content_type=None)
-                        ip = (
-                            data.get("origin")
-                            or data.get("ip")
-                            or data.get("query")
-                            or None
-                        )
+                        # Try parsing as JSON first
+                        try:
+                            data = await resp.json(content_type=None)
+                            if isinstance(data, dict):
+                                ip = (
+                                    data.get("origin")
+                                    or data.get("ip")
+                                    or data.get("query")
+                                    or None
+                                )
+                            elif isinstance(data, str):
+                                ip = data
+                        except Exception:
+                            # Not valid JSON
+                            pass
+
+                        # If JSON parsing did not yield an IP, check plain text
+                        if not ip:
+                            text_raw = await resp.text()
+                            text = text_raw.strip().strip('"\'')
+                            # Look for an IPv4 address pattern
+                            ipv4_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', text)
+                            if ipv4_match:
+                                ip = ipv4_match.group(0)
+
                         if ip and "," in ip:
                             ip = ip.split(",")[0].strip()
 
                         if not (200 <= status < 300):
                             error = f"HTTP {status}"
-                    except Exception as json_exc:
-                        error = f"HTTP {status}, Parse error: {str(json_exc)[:50]}"
+                    except Exception as exc:
+                        error = f"HTTP {status}, Parse error: {str(exc)[:50]}"
 
                     return {
                         "success": True,
