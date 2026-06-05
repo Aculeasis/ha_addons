@@ -10,5 +10,10 @@ RUN chmod a+x /tmp/gost_install.sh && \
     /tmp/gost_install.sh && \
     rm -f /tmp/gost_install.sh
 
+COPY glider_install.sh /tmp/
+RUN chmod a+x /tmp/glider_install.sh && \
+    /tmp/glider_install.sh && \
+    rm -f /tmp/glider_install.sh
+
 COPY run.sh /etc/services.d/gost-ss/run
 RUN chmod a+x /etc/services.d/gost-ss/run

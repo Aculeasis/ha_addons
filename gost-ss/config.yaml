@@ -1,7 +1,7 @@
-name: "Shadowsocks & GOST Runner"
-version: "1.1.4"
+name: "Shadowsocks, GOST & Glider Runner"
+version: "1.2.0"
 slug: "gost-ss"
-description: "Run any type and count of Shadowsocks and GOST instances"
+description: "Run any type and count of Shadowsocks, GOST, and Glider instances"
 url: "https://github.com/Aculeasis/ha_addons/tree/main/gost-ss"
 image: "ghcr.io/aculeasis/gost-ss-{arch}"
 arch:

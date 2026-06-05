@@ -1,6 +1,6 @@
 # Configuration
 
-This Home Assistant add-on runs [Shadowsocks-libev](https://github.com/shadowsocks/shadowsocks-libev) and [GOST v3](https://gost.run/) proxy instances based on config files you provide. No add-on options needed — just drop your config files and start.
+This Home Assistant add-on runs [Shadowsocks-libev](https://github.com/shadowsocks/shadowsocks-libev), [GOST v3](https://gost.run/), and [Glider v0.16.4](https://github.com/nadoo/glider) proxy instances based on config files you provide. No add-on options needed — just drop your config files and start.
 
 
 ## Config Directory
@@ -56,9 +56,23 @@ or `<name>.yml`
 
 - **`<name>`** — a label for the instance, used as a log prefix; can contain dashes
 
-| Filename              | Binary launched | Log prefix    |
-|-----------------------|-----------------|---------------|
+| Filename              | Binary launched | Log prefix     |
+|-----------------------|-----------------|----------------|
 | `gost-tunnel.yaml`    | `gost`          | `[gost-tunnel]`|
+
+### Glider (CONF)
+
+Any `.conf` files placed in the directory are automatically run via `glider`:
+
+```
+<name>.conf
+```
+
+- **`<name>`** — a label for the instance, used as a log prefix; can contain dashes
+
+| Filename              | Binary launched | Log prefix     |
+|-----------------------|-----------------|----------------|
+| `glider-proxy.conf`   | `glider`        | `[glider-proxy]`|
 
 ## Config File Format
 
@@ -114,8 +128,32 @@ services:
             type: tcp
 ```
 
+### Glider
+
+Standard Glider key=value configuration. Example for an HTTP/SOCKS5 listener forwarding through a remote proxy:
+
+```ini
+# Listen on a local port as HTTP+SOCKS5 proxy
+listen=:5004
+
+# Forward traffic through a remote SS server
+forward=ss://chacha20-ietf-poly1305:your_password@your.server.com:8388
+
+# Verbose logging
+verbose=true
+```
+
+Example for a standalone SOCKS5 listener (no forwarder):
+
+```ini
+listen=socks5://127.0.0.1:5005
+verbose=true
+```
+
+Full Glider config reference: [github.com/nadoo/glider](https://github.com/nadoo/glider#usage)
+
 ## Ports
 
-The add-on exposes ports **4999–5011** (TCP and UDP). Map them in the **Network** tab of the add-on settings to match the local bound ports in your config files (e.g. `local_port` for SS or `addr: :<port>` for GOST).
+The add-on exposes ports **4999–5011** (TCP and UDP). Map them in the **Network** tab of the add-on settings to match the local bound ports in your config files (e.g. `local_port` for SS, `addr: :<port>` for GOST, or `listen=:<port>` for Glider).
 
 Each instance must use a unique port.

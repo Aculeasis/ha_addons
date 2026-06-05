@@ -73,6 +73,24 @@ for config_file in /config/*.yaml /config/*.yml; do
     fi
 done
 
+bashio::log.info "Starting glider instances..."
+
+# Iterate through all .conf files in /config
+for config_file in /config/*.conf; do
+    if [ -f "$config_file" ]; then
+        filename=$(basename "$config_file")
+        NAME="${filename%.*}" # Remove extension
+
+        bashio::log.info "Launching glider instance: NAME=$NAME with config $config_file"
+
+        # Launch the glider process in the background
+        glider -config "$config_file" > >(awk -v name="[$NAME]" '{ print name $0 }') 2>&1 &
+
+        # Store the PID of the background process
+        PIDS="$PIDS $!"
+    fi
+done
+
 if [ -z "$PIDS" ]; then
     # Path below is the host-side location shown to the user, not the container mount
     bashio::log.warning "No configuration files found in /addon_configs/89e82855_gost-ss. Do nothing."
