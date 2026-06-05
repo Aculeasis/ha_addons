@@ -1,5 +1,5 @@
 name: "Shadowsocks, GOST & Glider Runner"
-version: "1.2.1"
+version: "1.2.2"
 slug: "gost-ss"
 description: "Run any type and count of Shadowsocks, GOST, and Glider instances"
 url: "https://github.com/Aculeasis/ha_addons/tree/main/gost-ss"

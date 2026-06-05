@@ -26,8 +26,8 @@ curl -fsSL -o glider.tar.gz "${url}"
 
 echo "Installing..."
 tmp_dir=$(mktemp -d)
-tar -xzf glider.tar.gz -C "${tmp_dir}" --strip-components=1 --wildcards "*/glider"
-mv "${tmp_dir}/glider" /usr/local/bin/glider
+tar -xzf glider.tar.gz -C "${tmp_dir}"
+mv "${tmp_dir}/glider_${GLIDER_VERSION}_linux_${cpu_arch}/glider" /usr/local/bin/glider
 chmod +x /usr/local/bin/glider
 rm -rf "${tmp_dir}" glider.tar.gz
 
