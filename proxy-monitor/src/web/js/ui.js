@@ -307,9 +307,11 @@ function renderStatBlock(label, stats, windowStats) {
 function latBadgeHtml(label, lat, winStats) {
   const w = winStats || {};
   const color = label === 'TCP' ? 'var(--accent)' : (label === 'UDP' ? 'var(--accent2)' : 'var(--text3)');
-  // Show 'NaN' when latency is null (all recent checks failed)
-  const latText = (lat !== null && lat !== undefined) ? fmtLatency(lat) : 'NaN';
-  const latCls = (lat !== null && lat !== undefined) ? latencyClass(lat) : 'lat-none';
+  // Show avg from window stats; fall back to last if avg is unavailable; 'NaN' if both are null
+  const displayVal = (w.lat_avg !== null && w.lat_avg !== undefined) ? w.lat_avg
+                   : (lat !== null && lat !== undefined) ? lat : null;
+  const latText = displayVal !== null ? fmtLatency(displayVal) : 'NaN';
+  const latCls = displayVal !== null ? latencyClass(displayVal) : 'lat-none';
   return `<div class="lat-entry">
     <span class="lat-label" style="color:${color};cursor:pointer">${label}</span>
     <span class="stat-latency ${latCls}"
