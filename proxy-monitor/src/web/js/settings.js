@@ -245,6 +245,9 @@ async function saveSettings() {
     toast('success', 'Settings saved, monitoring restarted');
     closeSettings();
     state.pendingConfig = null;
+    // Clear render cache so the next stats push fully re-renders all cards
+    _cardHashes.clear();
+    _navHash = '';
   }
 }
 

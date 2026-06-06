@@ -96,6 +96,14 @@ function renderGrid() {
   });
 
   existing.forEach((card, pid) => { if (!seen.has(pid)) card.remove(); });
+
+  // Reorder DOM nodes to match state.proxies order
+  const cards = [...grid.querySelectorAll('.proxy-card')];
+  const cardMap = new Map(cards.map(c => [c.dataset.pid, c]));
+  state.proxies.forEach(proxy => {
+    const card = cardMap.get(proxy.id);
+    if (card) grid.appendChild(card); // moves existing node to end → preserves order
+  });
 }
 
 function cardStatus(proxy) {
