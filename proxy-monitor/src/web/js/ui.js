@@ -132,14 +132,6 @@ function cardStatus(proxy) {
 const _latTip = (() => {
   const el = document.createElement('div');
   el.id = 'lat-tip';
-  Object.assign(el.style, {
-    position: 'fixed', zIndex: 9999, pointerEvents: 'auto', display: 'none',
-    background: 'rgba(8,8,20,0.97)', border: '1px solid rgba(91,138,245,0.35)',
-    borderRadius: '10px', padding: '12px 16px', font: "12px 'Inter',sans-serif",
-    color: '#e8e8f5', boxShadow: '0 12px 40px rgba(0,0,0,0.6)', minWidth: '190px',
-    cursor: 'pointer', userSelect: 'none'
-  });
-  // Use capture to ensure we catch the click before it bubbles or gets lost
   const closeTip = (e) => {
     e.stopPropagation();
     e.preventDefault();
@@ -155,7 +147,7 @@ function _tipRow(label, val, color = '', nanText = '—') {
   const v = val !== null && val !== undefined && !isNaN(val)
     ? fmtLatency(val) : nanText;
   return `<div style="display:flex;justify-content:space-between;gap:24px;line-height:1.9">
-    <span style="color:#8888a8">${label}</span>
+    <span style="color:var(--text3)">${label}</span>
     <span style="${color ? 'color:' + color : ''}">${v}</span></div>`;
 }
 
@@ -174,11 +166,11 @@ function showLatTip(badge, e) {
   _latTip.innerHTML = `
     <div style="font-weight:700;color:var(--accent);font-size:13px;margin-bottom:8px">${label} Latency</div>
     <div style="display:flex;justify-content:space-between;gap:24px;line-height:1.9">
-      <span style="color:#8888a8">Last</span><span>${lastText}</span></div>
-    <div style="border-top:1px solid rgba(255,255,255,0.07);margin:5px 0"></div>
+      <span style="color:var(--text3)">Last</span><span>${lastText}</span></div>
+    <div style="border-top:1px solid var(--border);margin:5px 0"></div>
     ${_tipRow(`Avg (${wm}m window)`, avg, '', hasWindowData ? '—' : nanLabel)}
-    ${_tipRow('Min', min, '#12d88a', hasWindowData ? '—' : nanLabel)}
-    ${_tipRow('Max', max, '#f5a840', hasWindowData ? '—' : nanLabel)}`;
+    ${_tipRow('Min', min, 'var(--success)', hasWindowData ? '—' : nanLabel)}
+    ${_tipRow('Max', max, 'var(--warning)', hasWindowData ? '—' : nanLabel)}`;
   _latTip.style.display = 'block';
   _positionTip(e);
 }

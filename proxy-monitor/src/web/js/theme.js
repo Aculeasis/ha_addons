@@ -10,7 +10,8 @@ const THEME_ICONS = {
 function applyTheme(theme) {
   state.theme = theme;
   if (theme === 'system') {
-    document.documentElement.removeAttribute('data-theme');
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
   } else {
     document.documentElement.setAttribute('data-theme', theme);
   }
@@ -46,11 +47,9 @@ document.addEventListener('click', (e) => {
 function initTheme() {
   applyTheme(state.theme);
   
-  // Listen for system theme changes
+  // Listen for system theme changes — re-resolve and re-render
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    if (state.theme === 'system' && state.detailChart && state.detailProxyId) {
-      loadDetailChart();
-    }
+    if (state.theme === 'system') applyTheme('system');
   });
 }
 

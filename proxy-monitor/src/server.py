@@ -89,35 +89,12 @@ checker: Optional[ProxyChecker] = None
 ws_clients: Set[WebSocket] = set()
 check_task: Optional[asyncio.Task] = None
 cleanup_task: Optional[asyncio.Task] = None
-session_cleanup_task: Optional[asyncio.Task] = None
 
 # token -> expiry (unix timestamp)
 sessions: Dict[str, float] = {}
 SESSION_TTL = 86400  # 24 h
 
 WEB_DIR = Path(__file__).parent / "web"
-
-# Cached monitoring settings (updated on config load)
-class MonitoringSettings:
-    """Cached monitoring settings to avoid repeated dict lookups in the check loop."""
-    __slots__ = ('interval', 'timeout', 'concurrent', 'stagger', 'window_minutes')
-
-    def __init__(self):
-        self.interval: int = 60
-        self.timeout: float = 10.0
-        self.concurrent: int = 10
-        self.stagger: bool = True
-        self.window_minutes: int = 5
-
-    def update(self, cfg: Dict[str, Any]) -> None:
-        mon = cfg.get("monitoring", {})
-        self.interval = mon.get("check_interval_seconds", 60)
-        self.timeout = float(mon.get("check_timeout_seconds", 10))
-        self.concurrent = mon.get("concurrent_checks", 10)
-        self.stagger = mon.get("stagger", True)
-        self.window_minutes = mon.get("recent_window_minutes", 5)
-
-mon_settings = MonitoringSettings()
 
 # ------------------------------------------------------------------ #
 #  Config helpers                                                      #
@@ -230,15 +207,14 @@ async def _db_cleanup(force_vacuum: bool = False) -> None:
 
 
 async def _run_checks() -> None:
-    """Main check loop using cached monitoring settings."""
+    """Main check loop."""
     await asyncio.sleep(1)  # brief pause to let uvicorn settle
     while True:
         cycle_start = time.monotonic()
 
-        # Use cached settings instead of repeated dict lookups
-        interval = mon_settings.interval
-        concurrent = mon_settings.concurrent
-        stagger = mon_settings.stagger
+        mon = config.get("monitoring", {})
+        interval = mon.get("check_interval_seconds", 60)
+        concurrent = mon.get("concurrent_checks", 10)
         proxies: List[Dict] = config.get("proxies", [])
 
         if not proxies:
@@ -247,17 +223,7 @@ async def _run_checks() -> None:
 
         sem = asyncio.Semaphore(concurrent)
 
-        # Calculate stagger delay to spread checks over the interval
-        # We aim to finish starting all checks by 80% of the interval
-        stagger_delay = 0.0
-        if stagger and len(proxies) > 1:
-            total_spread = interval * 0.8
-            stagger_delay = total_spread / len(proxies)
-
-        async def _check_one(proxy: Dict, delay: float) -> None:
-            if delay > 0:
-                await asyncio.sleep(delay)
-
+        async def _check_one(proxy: Dict) -> None:
             async with sem:
                 pid = get_proxy_id(proxy)
                 try:
@@ -282,19 +248,14 @@ async def _run_checks() -> None:
                     logger.error("Unhandled error checking %s: %s", proxy.get("name", pid), err)
 
         try:
-            # Plan checks with incremental delays
-            tasks = []
-            for i, p in enumerate(proxies):
-                tasks.append(_check_one(p, i * stagger_delay))
-
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(*[_check_one(p) for p in proxies], return_exceptions=True)
+            await storage.commit()  # type: ignore[union-attr]
             await _broadcast_stats()
         except asyncio.CancelledError:
             return
         except Exception as exc:
             logger.error("Check loop error: %s", exc)
 
-        # Calculate time to sleep until the next interval starts
         elapsed = time.monotonic() - cycle_start
         sleep_time = max(0.1, interval - elapsed)
 
@@ -317,22 +278,6 @@ async def _run_cleanup() -> None:
             logger.error("Cleanup error: %s", exc)
 
 
-async def _run_session_cleanup() -> None:
-    """Periodically clean up expired sessions to prevent memory leaks."""
-    while True:
-        try:
-            await asyncio.sleep(3600)  # Run every hour
-        except asyncio.CancelledError:
-            return
-        try:
-            now = time.time()
-            expired = [token for token, expiry in sessions.items() if expiry < now]
-            for token in expired:
-                sessions.pop(token, None)
-            if expired:
-                logger.info("Cleaned up %d expired session(s)", len(expired))
-        except Exception as exc:
-            logger.error("Session cleanup error: %s", exc)
 
 
 # ------------------------------------------------------------------ #
@@ -341,14 +286,16 @@ async def _run_session_cleanup() -> None:
 
 async def _all_stats() -> Dict[str, Any]:
     proxies: List[Dict] = config.get("proxies", [])
-    window = config.get("monitoring", {}).get("recent_window_minutes", 5)
+    mon = config.get("monitoring", {})
+    window = mon.get("recent_window_minutes", 5)
+    interval = mon.get("check_interval_seconds", 60)
+    sparkline_since = int(time.time()) - 60 * interval
     proxy_list: List[Dict] = []
     alive_count = 0
     partial_count = 0
     dead_count = 0
 
-    # Batch fetch all summaries in 4 bulk queries instead of N*4 queries
-    all_summaries = await storage.get_all_summaries(window)  # type: ignore[union-attr]
+    all_summaries = await storage.get_all_summaries(window, sparkline_since=sparkline_since)  # type: ignore[union-attr]
 
     for proxy in proxies:
         pid = get_proxy_id(proxy)
@@ -454,11 +401,10 @@ async def _broadcast_stats() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global config, storage, checker, check_task, cleanup_task, session_cleanup_task
+    global config, storage, checker, check_task, cleanup_task
 
     config = load_config()
     apply_logging_level()
-    mon_settings.update(config)  # Cache monitoring settings
     db_path = config.get("storage", {}).get("db_path", "proxy_data.db")
     storage = Storage(db_path)
     await storage.init()
@@ -466,7 +412,6 @@ async def lifespan(app: FastAPI):
 
     check_task = asyncio.create_task(_run_checks())
     cleanup_task = asyncio.create_task(_run_cleanup())
-    session_cleanup_task = asyncio.create_task(_run_session_cleanup())
 
     n = len(config.get("proxies", []))
     logger.warning("Proxy Monitor started - %d prox%s configured.", n, "ies" if n != 1 else "y")
@@ -474,7 +419,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Graceful shutdown
-    for task in (check_task, cleanup_task, session_cleanup_task):
+    for task in (check_task, cleanup_task):
         if task and not task.done():
             task.cancel()
             try:
@@ -577,44 +522,15 @@ async def api_get_config(_: None = Depends(_require_auth)) -> Dict:
 
 @app.get("/api/db-size")
 async def api_db_size(_: None = Depends(_require_auth)) -> Dict:
-    db_path = str(config.get("storage", {}).get("db_path", "proxy_data.db"))
-    try:
-        p = Path(db_path).resolve()
-    except Exception:
-        return {"size": 0, "formatted": "Error"}
-
-    # Define allowed roots for database location
-    roots = [Path.cwd().resolve()]
-    data_dir = Path("/data")
-    if data_dir.exists():
-        roots.append(data_dir.resolve())
-
-    # Check if the path is within any allowed root
-    is_safe = False
-    for r in roots:
-        try:
-            if p.is_relative_to(r):
-                is_safe = True
-                break
-        except ValueError:
-            continue
-
-    if not (p.is_file() and is_safe):
-        return {"size": 0, "formatted": "0 B" if not p.exists() else "N/A"}
-
+    p = Path(config.get("storage", {}).get("db_path", "proxy_data.db"))
+    if not p.is_file():
+        return {"size": 0, "formatted": "0 B"}
     size_bytes = p.stat().st_size
-
-    # Format size (KB, MB, GB with rounding to 1 decimal place)
-    if size_bytes < 1024:
-        formatted = f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
-        formatted = f"{size_bytes / 1024:.1f} KB"
-    elif size_bytes < 1024 * 1024 * 1024:
-        formatted = f"{size_bytes / (1024 * 1024):.1f} MB"
-    else:
-        formatted = f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
-
-    return {"size": size_bytes, "formatted": formatted}
+    s = float(size_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if s < 1024 or unit == "GB":
+            return {"size": size_bytes, "formatted": f"{s:.0f} {unit}" if unit == "B" else f"{s:.1f} {unit}"}
+        s /= 1024
 
 
 @app.post("/api/db-vacuum")
@@ -638,7 +554,6 @@ async def api_save_config(
     save_config(body)
     config = body
     apply_logging_level()
-    mon_settings.update(config)  # Update cached settings
     checker = ProxyChecker(config)
 
     # Restart check loop with new settings

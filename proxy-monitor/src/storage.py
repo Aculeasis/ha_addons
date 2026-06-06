@@ -14,14 +14,12 @@ CHECK_TYPE_MAP = {"tcp": 1, "udp": 2}
 CHECK_TYPE_REV = {1: "tcp", 2: "udp"}
 
 # Current database schema version
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 class Storage:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
         self._proxy_cache: Dict[str, int] = {}
-        # Cache for error states: key=(proxy_fk, check_type), value=(error, error_timestamp)
-        self._error_cache: Dict[tuple, tuple] = {}
         self._db: Optional[aiosqlite.Connection] = None
 
     # ------------------------------------------------------------------ #
@@ -95,6 +93,32 @@ class Storage:
             await self._db.commit()
             logger.warning("Migration v1 -> v2: Added error_timestamp column")
 
+    async def _migrate_v2_to_v3(self) -> None:
+        """
+        Migration from v2 to v3.
+        Adds incremental total_success / total_count counters to proxy_state
+        so we no longer need to scan the entire proxy_checks table for totals.
+        """
+        cur = await self._db.execute("PRAGMA table_info(proxy_state)")
+        cols = [row[1] for row in await cur.fetchall()]
+        if "total_success" not in cols:
+            await self._db.execute("ALTER TABLE proxy_state ADD COLUMN total_success INTEGER DEFAULT 0")
+            await self._db.execute("ALTER TABLE proxy_state ADD COLUMN total_count INTEGER DEFAULT 0")
+            # Populate counters from existing history
+            await self._db.execute("""
+                UPDATE proxy_state SET
+                    total_success = COALESCE((
+                        SELECT SUM(success) FROM proxy_checks
+                        WHERE proxy_fk = proxy_state.proxy_fk AND check_type = proxy_state.check_type
+                    ), 0),
+                    total_count = COALESCE((
+                        SELECT COUNT(*) FROM proxy_checks
+                        WHERE proxy_fk = proxy_state.proxy_fk AND check_type = proxy_state.check_type
+                    ), 0)
+            """)
+            await self._db.commit()
+            logger.warning("Migration v2 -> v3: Added incremental total counters")
+
     async def init(self) -> None:
         """Initialize database connection and run migrations if needed."""
         self._db = await aiosqlite.connect(self.db_path)
@@ -123,24 +147,15 @@ class Storage:
             await self._set_schema_version(2)
             current_version = 2
 
-        # Add future migrations here:
-        # if current_version < 3:
-        #     await self._migrate_v2_to_v3()
-        #     await self._set_schema_version(3)
-        #     current_version = 3
+        if current_version < 3:
+            await self._migrate_v2_to_v3()
+            await self._set_schema_version(3)
+            current_version = 3
 
         # Load proxy cache
         cur = await self._db.execute("SELECT id, proxy_id FROM proxies")
         for pid, p_str in await cur.fetchall():
             self._proxy_cache[p_str] = pid
-
-        # Load error cache from existing proxy_state
-        cur = await self._db.execute(
-            "SELECT proxy_fk, check_type, error, error_timestamp FROM proxy_state WHERE error IS NOT NULL"
-        )
-        for row in await cur.fetchall():
-            if row[2]:  # error is not None/empty
-                self._error_cache[(row[0], row[1])] = (row[2], row[3])
 
         logger.warning("Storage initialised: %s", self.db_path)
 
@@ -150,6 +165,11 @@ class Storage:
             await self._db.close()
             self._db = None
 
+    async def commit(self) -> None:
+        """Flush pending writes to disk. Call after a batch of save_check() calls."""
+        if self._db:
+            await self._db.commit()
+
     async def _get_proxy_fk(self, proxy_id: str) -> int:
         """Get or create proxy foreign key using the cached connection."""
         if proxy_id in self._proxy_cache:
@@ -157,7 +177,6 @@ class Storage:
         if not self._db:
             raise RuntimeError("Database not initialized")
         await self._db.execute("INSERT OR IGNORE INTO proxies (proxy_id) VALUES (?)", (proxy_id,))
-        await self._db.commit()
         cur = await self._db.execute("SELECT id FROM proxies WHERE proxy_id = ?", (proxy_id,))
         row = await cur.fetchone()
         if row:
@@ -178,94 +197,60 @@ class Storage:
         external_ip: Optional[str] = None,
         error: Optional[str] = None,
     ) -> None:
-        """Save a check result using the persistent connection."""
+        """Save a check result. Does NOT commit — caller must call commit() after a batch."""
         if not self._db:
             raise RuntimeError("Database not initialized")
         ct_int = CHECK_TYPE_MAP.get(check_type, 1)
         proxy_fk = await self._get_proxy_fk(proxy_id)
-        await self._db.execute(
-            """
-            INSERT INTO proxy_checks
-                (proxy_fk, check_type, timestamp, success, latency_ms)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                proxy_fk,
-                ct_int,
-                timestamp,
-                1 if success else 0,
-                latency_ms,
-            ),
-        )
-        # Determine what to store for error fields
-        # If new check has error - store it with current timestamp
-        # If new check is successful - preserve previous error and its timestamp
-        store_error = error
-        store_error_ts = None
-        cache_key = (proxy_fk, ct_int)
-
-        if error:
-            store_error_ts = timestamp
-            # Update cache with new error
-            self._error_cache[cache_key] = (error, timestamp)
-        else:
-            # Try to get previous error from cache first
-            cached_error = self._error_cache.get(cache_key)
-            if cached_error and cached_error[0]:
-                store_error = cached_error[0]
-                store_error_ts = cached_error[1]
-            else:
-                # Cache miss - query database
-                cur = await self._db.execute(
-                    "SELECT error, error_timestamp FROM proxy_state WHERE proxy_fk = ? AND check_type = ?",
-                    (proxy_fk, ct_int),
-                )
-                prev_row = await cur.fetchone()
-                if prev_row and prev_row[0]:
-                    store_error = prev_row[0]
-                    store_error_ts = prev_row[1]
-                    # Update cache
-                    self._error_cache[cache_key] = (store_error, store_error_ts)
-
+        success_int = 1 if success else 0
 
         await self._db.execute(
-            """
-            INSERT OR REPLACE INTO proxy_state
-                (proxy_fk, check_type, timestamp, success, latency_ms, external_ip, error, error_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                proxy_fk,
-                ct_int,
-                timestamp,
-                1 if success else 0,
-                latency_ms,
-                external_ip,
-                store_error,
-                store_error_ts,
-            ),
+            "INSERT INTO proxy_checks (proxy_fk, check_type, timestamp, success, latency_ms) VALUES (?, ?, ?, ?, ?)",
+            (proxy_fk, ct_int, timestamp, success_int, latency_ms),
         )
-        await self._db.commit()
+
+        # UPSERT proxy_state with incremental totals and error preservation.
+        # On conflict: totals are incremented, error is kept from the latest
+        # failure (CASE expression preserves previous error on success).
+        error_ts = timestamp if error else None
+        await self._db.execute(
+            """
+            INSERT INTO proxy_state
+                (proxy_fk, check_type, timestamp, success, latency_ms,
+                 external_ip, error, error_timestamp, total_success, total_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(proxy_fk, check_type) DO UPDATE SET
+                timestamp       = excluded.timestamp,
+                success         = excluded.success,
+                latency_ms      = excluded.latency_ms,
+                external_ip     = excluded.external_ip,
+                error           = CASE WHEN excluded.error IS NOT NULL
+                                       THEN excluded.error
+                                       ELSE proxy_state.error END,
+                error_timestamp = CASE WHEN excluded.error IS NOT NULL
+                                       THEN excluded.error_timestamp
+                                       ELSE proxy_state.error_timestamp END,
+                total_success   = proxy_state.total_success + excluded.total_success,
+                total_count     = proxy_state.total_count + 1
+            """,
+            (proxy_fk, ct_int, timestamp, success_int, latency_ms,
+             external_ip, error, error_ts, success_int),
+        )
 
     # ------------------------------------------------------------------ #
     #  Read – summary (used by WebSocket broadcast)                       #
     # ------------------------------------------------------------------ #
     async def get_all_summaries(
-        self, window_minutes: int = 5
+        self, window_minutes: int = 5, sparkline_since: int = 0
     ) -> Dict[str, Dict[str, Any]]:
-        """Fetch stats for ALL proxies in 4 bulk queries instead of N*4 queries."""
+        """Fetch stats for ALL proxies in 3 bulk queries."""
         if not self._db:
             raise RuntimeError("Database not initialized")
 
         now = int(time.time())
         window_start = now - window_minutes * 60
-        # 1. Totals
-        async with self._db.execute(
-            "SELECT proxy_fk, check_type, SUM(success), COUNT(*) FROM proxy_checks GROUP BY proxy_fk, check_type"
-        ) as cur:
-            total_rows = await cur.fetchall()
 
-        # 2. Window stats
+        # 1. Window stats (recent success rates + latency)
         async with self._db.execute(
             """
             SELECT proxy_fk, check_type, SUM(success), COUNT(*),
@@ -278,56 +263,51 @@ class Storage:
         ) as cur:
             window_rows = await cur.fetchall()
 
-        # 3. Last states
+        # 2. Last states + incremental totals (from proxy_state — no table scan)
         async with self._db.execute(
-            "SELECT proxy_fk, check_type, success, latency_ms, external_ip, error, timestamp, error_timestamp FROM proxy_state"
+            """SELECT proxy_fk, check_type, success, latency_ms, external_ip,
+                      error, timestamp, error_timestamp, total_success, total_count
+               FROM proxy_state"""
         ) as cur:
             last_rows = await cur.fetchall()
 
-        # 4. Sparklines: last 60 checks for each proxy + type
+        # 3. Sparklines: recent checks since cutoff (uses index idx_ts)
         async with self._db.execute(
             """
-            WITH RecentChecks AS (
-                SELECT proxy_fk, check_type, timestamp, success, latency_ms,
-                       ROW_NUMBER() OVER (PARTITION BY proxy_fk, check_type ORDER BY timestamp DESC) as rn
-                FROM proxy_checks
-            )
             SELECT proxy_fk, check_type, timestamp, success, 1 - success as fail, latency_ms
-            FROM RecentChecks
-            WHERE rn <= 60
+            FROM proxy_checks
+            WHERE timestamp >= ?
             ORDER BY proxy_fk, check_type, timestamp ASC
-            """
+            """,
+            (sparkline_since,),
         ) as cur:
             sparkline_rows = await cur.fetchall()
 
         fk_to_id = {v: k for k, v in self._proxy_cache.items()}
-        by_proxy: Dict[str, List[list]] = {pid: [[], [], [], []] for pid in self._proxy_cache}
+        by_proxy: Dict[str, List[list]] = {pid: [[], [], []] for pid in self._proxy_cache}
 
-        for r in total_rows:
-            if pid := fk_to_id.get(r[0]): by_proxy[pid][0].append(r[1:])
         for r in window_rows:
-            if pid := fk_to_id.get(r[0]): by_proxy[pid][1].append(r[1:])
+            if pid := fk_to_id.get(r[0]): by_proxy[pid][0].append(r[1:])
         for r in last_rows:
-            if pid := fk_to_id.get(r[0]): by_proxy[pid][2].append(r[1:])
+            if pid := fk_to_id.get(r[0]): by_proxy[pid][1].append(r[1:])
         for r in sparkline_rows:
-            if pid := fk_to_id.get(r[0]): by_proxy[pid][3].append(r[1:])
+            if pid := fk_to_id.get(r[0]): by_proxy[pid][2].append(r[1:])
 
         return {pid: self._assemble_summary(*rows) for pid, rows in by_proxy.items()}
 
     @staticmethod
     def _assemble_summary(
-            total_rows: list, window_rows: list, last_rows: list, sparkline_rows: list
+            window_rows: list, last_rows: list, sparkline_rows: list
     ) -> Dict[str, Any]:
         """Helper to structure raw DB rows into the summary dictionary."""
         def _round(v: Optional[float]) -> Optional[float]:
             return round(v, 1) if v is not None else None
 
         total_stats: Dict[str, Dict] = {}
-        for ct_int, success, total in total_rows:
-            ct = CHECK_TYPE_REV.get(ct_int, "tcp")
-            total_stats[ct] = {"success": int(success or 0), "fail": int(total - (success or 0)), "total": int(total)}
-
         window_stats: Dict[str, Dict] = {}
+        last_checks: Dict[str, Dict] = {}
+        sparkline: Dict[str, List[Dict]] = {}
+
         for ct_int, success, total, lat_avg, lat_min, lat_max in window_rows:
             ct = CHECK_TYPE_REV.get(ct_int, "tcp")
             window_stats[ct] = {
@@ -335,9 +315,9 @@ class Storage:
                 "lat_avg": _round(lat_avg), "lat_min": _round(lat_min), "lat_max": _round(lat_max),
             }
 
-        last_checks: Dict[str, Dict] = {}
         for row in last_rows:
-            # row: check_type(0), success(1), latency_ms(2), external_ip(3), error(4), timestamp(5), error_timestamp(6)
+            # row: check_type(0), success(1), latency_ms(2), external_ip(3),
+            #      error(4), timestamp(5), error_timestamp(6), total_success(7), total_count(8)
             ct = CHECK_TYPE_REV.get(row[0], "tcp")
             last_checks[ct] = {
                 "success": bool(row[1]),
@@ -347,8 +327,10 @@ class Storage:
                 "timestamp": row[5],
                 "error_timestamp": row[6],
             }
+            ts = int(row[7] or 0)
+            tc = int(row[8] or 0)
+            total_stats[ct] = {"success": ts, "fail": tc - ts, "total": tc}
 
-        sparkline: Dict[str, List[Dict]] = {}
         for row in sparkline_rows:
             # row: check_type(0), timestamp(1), success(2), fail(3), latency_ms(4)
             ct = CHECK_TYPE_REV.get(row[0], "tcp")
@@ -461,15 +443,9 @@ class Storage:
         await self._db.execute(f"DELETE FROM proxies WHERE id IN ({placeholders})", to_delete_fks)
         await self._db.commit()
 
-        # Update caches
+        # Update cache
         for pid in to_delete_ids:
             self._proxy_cache.pop(pid, None)
-
-        # Clear error cache entries for deleted proxies
-        for fk in to_delete_fks:
-            # Remove both tcp (1) and udp (2) entries
-            self._error_cache.pop((fk, 1), None)
-            self._error_cache.pop((fk, 2), None)
 
         return len(to_delete_ids)
 

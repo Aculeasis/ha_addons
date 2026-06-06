@@ -14,6 +14,7 @@ import re
 import socket
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import aiohttp
 import socks
@@ -81,7 +82,7 @@ class ProxyChecker:
         user = proxy.get("username", "") or ""
         pwd = proxy.get("password", "") or ""
         if user and pwd:
-            return f"socks5://{user}:{pwd}@{host}:{port}"
+            return f"socks5://{quote(user, safe='')}:{quote(pwd, safe='')}@{host}:{port}"
         return f"socks5://{host}:{port}"
 
     async def check_tcp(self, proxy: Dict) -> Dict[str, Any]:
