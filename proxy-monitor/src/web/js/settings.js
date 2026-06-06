@@ -44,6 +44,10 @@ function buildSettingsHtml(cfg) {
       <div class="proxy-item-addr">${esc(p.host)}:${p.port}</div>
     </div>
     <div class="proxy-item-actions">
+      <div class="proxy-move-btns">
+        ${i > 0 ? '<button class="btn-move" onclick="moveProxy(' + i + ', -1)" title="Move up"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></button>' : ''}
+        ${i < proxies.length - 1 ? '<button class="btn-move" onclick="moveProxy(' + i + ', 1)" title="Move down"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>' : ''}
+      </div>
       <button class="btn btn-ghost btn-sm" onclick="editProxy(${i})">Edit</button>
       <button class="btn btn-danger btn-sm" onclick="deleteProxy(${i})">✕</button>
     </div>
@@ -382,6 +386,17 @@ function saveProxy() {
 function cancelProxyEdit() {
   document.querySelectorAll('[id^="proxy-edit-container-"]').forEach(c => c.innerHTML = '');
   state.editingProxyIndex = null;
+}
+
+function moveProxy(index, direction) {
+  cancelProxyEdit();
+  const proxies = state.pendingConfig?.proxies;
+  if (!proxies) return;
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= proxies.length) return;
+  [proxies[index], proxies[newIndex]] = [proxies[newIndex], proxies[index]];
+  const body = document.getElementById('settings-body');
+  if (body) body.innerHTML = buildSettingsHtml(state.pendingConfig);
 }
 
 function deleteProxy(index) {

@@ -347,8 +347,36 @@
 
 .proxy-item-actions {
   display: flex;
+  align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.proxy-move-btns {
+  display: flex;
+  gap: 2px;
+  margin-right: 2px;
+}
+
+.btn-move {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text3);
+  cursor: pointer;
+  transition: all var(--t);
+}
+
+.btn-move:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(91, 138, 245, 0.08);
 }
 
 @media (max-width: 480px) {
@@ -367,6 +395,16 @@
 
   .proxy-item-actions .btn {
     padding: 4px 8px;
+  }
+
+  .btn-move {
+    width: 22px;
+    height: 22px;
+  }
+
+  .btn-move svg {
+    width: 12px;
+    height: 12px;
   }
 }
 
