@@ -15,7 +15,6 @@ import subprocess
 # This allows esp_data.py templates (value_json.aXXX) to work with NVMe data
 NVME_KEY_MAP = {
     'Temperature':                     194,
-    'Available Spare':                 169,  # maps to "Life" (remaining %)
     'Percentage Used':                 177,  # wear leveling equivalent
     'Power On Hours':                    9,
     'Power Cycles':                     12,
@@ -105,9 +104,8 @@ def _parse_nvme(data: list[bytes]) -> dict:
 
         result[f"a{attr_id}"] = parsed
 
-    # Invert Percentage Used -> remaining life for a169 (Available Spare is already %)
-    # If we have Percentage Used (a177), also ensure a169 makes sense as "life remaining"
-    if 'a177' in result and 'a169' not in result:
+    # Compute Life (a169) from Percentage Used (a177): Life = 100% - wear%
+    if 'a177' in result:
         result['a169'] = max(0, 100 - result['a177'])
 
     # Normalize Data Units Written/Read for esp_data.py formula: a241 * (32/1024) = GB
