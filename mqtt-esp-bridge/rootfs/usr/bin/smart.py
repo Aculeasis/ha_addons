@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import os
 import subprocess
 
 # {'Reallocated_Sector_Ct': 0, 'Power_On_Hours': 21, 'Power_Cycle_Count': 19, 'Wear_Leveling_Count': 1,
@@ -11,9 +12,10 @@ import subprocess
 
 
 def get_smart() -> dict:
+    smart_device = os.environ.get('SMART_DEVICE', '/dev/sda')
     try:
         data_result = subprocess.run(
-            ['/usr/sbin/smartctl', '-d', 'sat', '-a', '/dev/sda'], check=True, capture_output=True).stdout
+            ['/usr/sbin/smartctl', '-a', smart_device], check=True, capture_output=True).stdout
     except subprocess.CalledProcessError as e:
         if e.returncode in [4, 68, 64]:
             data_result = e.output

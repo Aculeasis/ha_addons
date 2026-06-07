@@ -31,9 +31,11 @@ options:
   mqtt_port: 1883
   mqtt_user: ""
   mqtt_password: ""
+  smart_device: "/dev/sda"
 schema:
   mqtt_auto: bool
   mqtt_port: port
   mqtt_host: str
   mqtt_user: str
   mqtt_password: password
+  smart_device: str
