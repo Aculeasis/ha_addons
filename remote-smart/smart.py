@@ -19,6 +19,8 @@ def _parse_smart(code: int, data_: dict, missing_attribute: bool) -> tuple[str, 
     elif code not in (0, 4, 64):
         return str(code), {}
     data = {}
+    is_nvme = (data_.get('device', {}).get('protocol') == 'NVMe'
+               or 'nvme_smart_health_information_log' in data_)
     try:
         data = {
             'Last updated': f'{datetime.now():%H:%M, %d.%m.%Y}',
@@ -29,37 +31,82 @@ def _parse_smart(code: int, data_: dict, missing_attribute: bool) -> tuple[str, 
             'Smart status': 'Healthy' if data_.get('smart_status', {}).get('passed', False) else 'Failed',
         }
 
-        atr = {}
-        for val in data_.get('ata_smart_attributes', {}).get('table', []):
-            atr[val['id']] = val['raw']['value'] if val['id'] != 9 else int_hours(val['raw']['string'])
-        attr_data = {
-            'Power on time': relative_time(datetime.now() - timedelta(hours=atr[9])) if 9 in atr else _UN,
-            'Power cycle count': atr.get(12, _UN),
-            'Start stop count': atr.get(4, _UN),
-            'Reallocated_Sector_Ct': atr.get(5, _UN),
-            'Reported_Uncorrect': atr.get(187, _UN),
-            'Command_Timeout': atr.get(188, _UN),
-            'Current_Pending_Sector': atr.get(197, _UN),
-            'Offline_Uncorrectable': atr.get(198, _UN),
-        }
-        if not missing_attribute:
-            attr_data = {k: v for k, v in attr_data.items() if v != _UN}
+        if is_nvme:
+            attr_data = _parse_nvme_attributes(data_, missing_attribute)
+        else:
+            attr_data = _parse_ata_attributes(data_, missing_attribute)
         data.update(attr_data)
 
-        logs = data_.get('ata_smart_self_test_log', {})
-        for values in [logs.get('standard', {}).get('table', []), logs.get('extended', {}).get('table', [])]:
-            for idx, val in enumerate(values):
-                test = val.get('type', {}).get('string', _UN)
-                result = val.get('status', {}).get('string', _UN)
-                if test == 'Short offline':
-                    test = 'Short'
-                if result == 'Completed without error':
-                    result = 'OK'
-                data[f'Test #{idx}'] = f'{test}, {result} @ {val.get("lifetime_hours", _UN)} hrs'
+        if is_nvme:
+            _parse_nvme_self_tests(data_, data)
+        else:
+            _parse_ata_self_tests(data_, data)
     except Exception as e:
         print(f'SMART PARSE ERROR: {e}')
         return 'Error', data
     return 'Awake', data
+
+
+def _parse_ata_attributes(data_: dict, missing_attribute: bool) -> dict:
+    atr = {}
+    for val in data_.get('ata_smart_attributes', {}).get('table', []):
+        atr[val['id']] = val['raw']['value'] if val['id'] != 9 else int_hours(val['raw']['string'])
+    attr_data = {
+        'Power on time': relative_time(datetime.now() - timedelta(hours=atr[9])) if 9 in atr else _UN,
+        'Power cycle count': atr.get(12, _UN),
+        'Start stop count': atr.get(4, _UN),
+        'Reallocated_Sector_Ct': atr.get(5, _UN),
+        'Reported_Uncorrect': atr.get(187, _UN),
+        'Command_Timeout': atr.get(188, _UN),
+        'Current_Pending_Sector': atr.get(197, _UN),
+        'Offline_Uncorrectable': atr.get(198, _UN),
+    }
+    if not missing_attribute:
+        attr_data = {k: v for k, v in attr_data.items() if v != _UN}
+    return attr_data
+
+
+def _parse_nvme_attributes(data_: dict, missing_attribute: bool) -> dict:
+    nvme = data_.get('nvme_smart_health_information_log', {})
+    hours = (data_.get('power_on_time', {}).get('hours')
+             or nvme.get('power_on_hours'))
+    attr_data = {
+        'Power on time': relative_time(datetime.now() - timedelta(hours=hours)) if hours else _UN,
+        'Power cycle count': data_.get('power_cycle_count', nvme.get('power_cycles', _UN)),
+        'Unsafe shutdowns': nvme.get('unsafe_shutdowns', _UN),
+        'Media errors': nvme.get('media_errors', _UN),
+        'Available spare': f'{nvme["available_spare"]}%' if 'available_spare' in nvme else _UN,
+        'Percentage used': f'{nvme["percentage_used"]}%' if 'percentage_used' in nvme else _UN,
+        'Data read': pretty_size(nvme['data_units_read'] * 512000) if 'data_units_read' in nvme else _UN,
+        'Data written': pretty_size(nvme['data_units_written'] * 512000) if 'data_units_written' in nvme else _UN,
+    }
+    if not missing_attribute:
+        attr_data = {k: v for k, v in attr_data.items() if v != _UN}
+    return attr_data
+
+
+def _parse_ata_self_tests(data_: dict, data: dict):
+    logs = data_.get('ata_smart_self_test_log', {})
+    for values in [logs.get('standard', {}).get('table', []), logs.get('extended', {}).get('table', [])]:
+        for idx, val in enumerate(values[:5]):
+            test = val.get('type', {}).get('string', _UN)
+            result = val.get('status', {}).get('string', _UN)
+            if test == 'Short offline':
+                test = 'Short'
+            if result == 'Completed without error':
+                result = 'OK'
+            data[f'Test #{idx}'] = f'{test}, {result} @ {val.get("lifetime_hours", _UN)} hrs'
+
+
+def _parse_nvme_self_tests(data_: dict, data: dict):
+    table = data_.get('nvme_self_test_log', {}).get('table', [])
+    for idx, val in enumerate(table[:5]):
+        test = val.get('self_test_code', {}).get('string', _UN)
+        result = val.get('self_test_result', {}).get('string', _UN)
+        if result == 'Completed without error':
+            result = 'OK'
+        hours = val.get('power_on_hours', _UN)
+        data[f'Test #{idx}'] = f'{test}, {result} @ {hours} hrs'
 
 
 def _read_smart(device: str, cmd: list | None) -> tuple[int, dict]:
