@@ -1,5 +1,5 @@
 name: "Remote S.M.A.R.T."
-version: "1.2.0"
+version: "1.2.1"
 slug: "remote-smart"
 description: "Reads SMART data from storage devices and publishes it to MQTT"
 url: "https://github.com/Aculeasis/ha_addons/tree/main/remote-smart"

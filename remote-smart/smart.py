@@ -75,8 +75,8 @@ def _parse_nvme_attributes(data_: dict, missing_attribute: bool) -> dict:
         'Power cycle count': data_.get('power_cycle_count', nvme.get('power_cycles', _UN)),
         'Unsafe shutdowns': nvme.get('unsafe_shutdowns', _UN),
         'Media errors': nvme.get('media_errors', _UN),
-        'Available spare': f'{nvme["available_spare"]}%' if 'available_spare' in nvme else _UN,
-        'Percentage used': f'{nvme["percentage_used"]}%' if 'percentage_used' in nvme else _UN,
+        'Available spare': f'{nvme["available_spare"]}' if 'available_spare' in nvme else _UN,
+        'Percentage used': f'{nvme["percentage_used"]}' if 'percentage_used' in nvme else _UN,
         'Data read': pretty_size(nvme['data_units_read'] * 512000) if 'data_units_read' in nvme else _UN,
         'Data written': pretty_size(nvme['data_units_written'] * 512000) if 'data_units_written' in nvme else _UN,
     }
