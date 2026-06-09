@@ -1,6 +1,7 @@
 """
 storage.py – SQLite persistence layer for proxy check results.
 """
+import asyncio
 import logging
 import time
 from typing import Any, Dict, List, Optional
@@ -21,6 +22,7 @@ class Storage:
         self.db_path = db_path
         self._proxy_cache: Dict[str, int] = {}
         self._db: Optional[aiosqlite.Connection] = None
+        self._write_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ #
     #  Init / Close                                                        #
@@ -105,17 +107,7 @@ class Storage:
             await self._db.execute("ALTER TABLE proxy_state ADD COLUMN total_success INTEGER DEFAULT 0")
             await self._db.execute("ALTER TABLE proxy_state ADD COLUMN total_count INTEGER DEFAULT 0")
             # Populate counters from existing history
-            await self._db.execute("""
-                UPDATE proxy_state SET
-                    total_success = COALESCE((
-                        SELECT SUM(success) FROM proxy_checks
-                        WHERE proxy_fk = proxy_state.proxy_fk AND check_type = proxy_state.check_type
-                    ), 0),
-                    total_count = COALESCE((
-                        SELECT COUNT(*) FROM proxy_checks
-                        WHERE proxy_fk = proxy_state.proxy_fk AND check_type = proxy_state.check_type
-                    ), 0)
-            """)
+            await self._recalculate_counters()
             await self._db.commit()
             logger.warning("Migration v2 -> v3: Added incremental total counters")
 
@@ -167,8 +159,9 @@ class Storage:
 
     async def commit(self) -> None:
         """Flush pending writes to disk. Call after a batch of save_check() calls."""
-        if self._db:
-            await self._db.commit()
+        async with self._write_lock:
+            if self._db:
+                await self._db.commit()
 
     async def _get_proxy_fk(self, proxy_id: str) -> int:
         """Get or create proxy foreign key using the cached connection."""
@@ -201,41 +194,45 @@ class Storage:
         if not self._db:
             raise RuntimeError("Database not initialized")
         ct_int = CHECK_TYPE_MAP.get(check_type, 1)
-        proxy_fk = await self._get_proxy_fk(proxy_id)
         success_int = 1 if success else 0
 
-        await self._db.execute(
-            "INSERT INTO proxy_checks (proxy_fk, check_type, timestamp, success, latency_ms) VALUES (?, ?, ?, ?, ?)",
-            (proxy_fk, ct_int, timestamp, success_int, latency_ms),
-        )
+        async with self._write_lock:
+            proxy_fk = await self._get_proxy_fk(proxy_id)
 
-        # UPSERT proxy_state with incremental totals and error preservation.
-        # On conflict: totals are incremented, error is kept from the latest
-        # failure (CASE expression preserves previous error on success).
-        error_ts = timestamp if error else None
-        await self._db.execute(
-            """
-            INSERT INTO proxy_state
-                (proxy_fk, check_type, timestamp, success, latency_ms,
-                 external_ip, error, error_timestamp, total_success, total_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-            ON CONFLICT(proxy_fk, check_type) DO UPDATE SET
-                timestamp       = excluded.timestamp,
-                success         = excluded.success,
-                latency_ms      = excluded.latency_ms,
-                external_ip     = excluded.external_ip,
-                error           = CASE WHEN excluded.error IS NOT NULL
-                                       THEN excluded.error
-                                       ELSE proxy_state.error END,
-                error_timestamp = CASE WHEN excluded.error IS NOT NULL
-                                       THEN excluded.error_timestamp
-                                       ELSE proxy_state.error_timestamp END,
-                total_success   = proxy_state.total_success + excluded.total_success,
-                total_count     = proxy_state.total_count + 1
-            """,
-            (proxy_fk, ct_int, timestamp, success_int, latency_ms,
-             external_ip, error, error_ts, success_int),
-        )
+            await self._db.execute(
+                "INSERT INTO proxy_checks (proxy_fk, check_type, timestamp, success, latency_ms) VALUES (?, ?, ?, ?, ?)",
+                (proxy_fk, ct_int, timestamp, success_int, latency_ms),
+            )
+
+            # UPSERT proxy_state with incremental totals and error preservation.
+            # On conflict: totals are incremented, error is kept from the latest
+            # failure (CASE expression preserves previous error on success).
+            error_ts = timestamp if error else None
+            await self._db.execute(
+                """
+                INSERT INTO proxy_state
+                    (proxy_fk, check_type, timestamp, success, latency_ms,
+                     external_ip, error, error_timestamp, total_success, total_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ON CONFLICT(proxy_fk, check_type) DO UPDATE SET
+                    timestamp       = excluded.timestamp,
+                    success         = excluded.success,
+                    latency_ms      = excluded.latency_ms,
+                    external_ip     = CASE WHEN excluded.external_ip IS NOT NULL
+                                           THEN excluded.external_ip
+                                           ELSE proxy_state.external_ip END,
+                    error           = CASE WHEN excluded.error IS NOT NULL
+                                           THEN excluded.error
+                                           ELSE proxy_state.error END,
+                    error_timestamp = CASE WHEN excluded.error IS NOT NULL
+                                           THEN excluded.error_timestamp
+                                           ELSE proxy_state.error_timestamp END,
+                    total_success   = proxy_state.total_success + excluded.total_success,
+                    total_count     = proxy_state.total_count + 1
+                """,
+                (proxy_fk, ct_int, timestamp, success_int, latency_ms,
+                 external_ip, error, error_ts, success_int),
+            )
 
     # ------------------------------------------------------------------ #
     #  Read – summary (used by WebSocket broadcast)                       #
@@ -396,22 +393,40 @@ class Storage:
     # ------------------------------------------------------------------ #
     #  Cleanup                                                             #
     # ------------------------------------------------------------------ #
+    async def _recalculate_counters(self) -> None:
+        """Recalculate total_success and total_count in proxy_state based on proxy_checks."""
+        await self._db.execute("""
+            UPDATE proxy_state SET
+                total_success = COALESCE((
+                    SELECT SUM(success) FROM proxy_checks
+                    WHERE proxy_fk = proxy_state.proxy_fk AND check_type = proxy_state.check_type
+                ), 0),
+                total_count = COALESCE((
+                    SELECT COUNT(*) FROM proxy_checks
+                    WHERE proxy_fk = proxy_state.proxy_fk AND check_type = proxy_state.check_type
+                ), 0)
+        """)
+
     async def cleanup_old_data(self, retention_days: int) -> int:
         if not self._db:
             raise RuntimeError("Database not initialized")
 
-        cutoff = int(time.time()) - retention_days * 86400
-        cur = await self._db.execute(
-            "DELETE FROM proxy_checks WHERE timestamp < ?", (cutoff,)
-        )
-        await self._db.commit()
-        deleted = cur.rowcount
-
-        if deleted:
-            logger.warning(
-                "Cleaned %d old records (retention=%dd)",
-                deleted, retention_days
+        async with self._write_lock:
+            cutoff = int(time.time()) - retention_days * 86400
+            cur = await self._db.execute(
+                "DELETE FROM proxy_checks WHERE timestamp < ?", (cutoff,)
             )
+            deleted = cur.rowcount
+
+            if deleted:
+                # Recalculate incremental counters to only reflect the retained period
+                await self._recalculate_counters()
+                logger.warning(
+                    "Cleaned %d old records and recalculated counters (retention=%dd)",
+                    deleted, retention_days
+                )
+                
+            await self._db.commit()
         return deleted
 
     async def sync_proxies(self, configured_ids: List[str]) -> int:
@@ -419,33 +434,34 @@ class Storage:
         if not self._db:
             raise RuntimeError("Database not initialized")
 
-        # Get all proxy IDs and their FKs from the DB
-        async with self._db.execute("SELECT id, proxy_id FROM proxies") as cur:
-            db_proxies = await cur.fetchall()
+        async with self._write_lock:
+            # Get all proxy IDs and their FKs from the DB
+            async with self._db.execute("SELECT id, proxy_id FROM proxies") as cur:
+                db_proxies = await cur.fetchall()
 
-        to_delete_fks = []
-        to_delete_ids = []
-        configured_set = set(configured_ids)
+            to_delete_fks = []
+            to_delete_ids = []
+            configured_set = set(configured_ids)
 
-        for fk, pid in db_proxies:
-            if pid not in configured_set:
-                to_delete_fks.append(fk)
-                to_delete_ids.append(pid)
+            for fk, pid in db_proxies:
+                if pid not in configured_set:
+                    to_delete_fks.append(fk)
+                    to_delete_ids.append(pid)
 
-        if not to_delete_fks:
-            return 0
+            if not to_delete_fks:
+                return 0
 
-        logger.warning("Removing %d obsolete proxies from database: %s", len(to_delete_ids), to_delete_ids)
+            logger.warning("Removing %d obsolete proxies from database: %s", len(to_delete_ids), to_delete_ids)
 
-        placeholders = ",".join("?" for _ in to_delete_fks)
-        await self._db.execute(f"DELETE FROM proxy_checks WHERE proxy_fk IN ({placeholders})", to_delete_fks)
-        await self._db.execute(f"DELETE FROM proxy_state WHERE proxy_fk IN ({placeholders})", to_delete_fks)
-        await self._db.execute(f"DELETE FROM proxies WHERE id IN ({placeholders})", to_delete_fks)
-        await self._db.commit()
+            placeholders = ",".join("?" for _ in to_delete_fks)
+            await self._db.execute(f"DELETE FROM proxy_checks WHERE proxy_fk IN ({placeholders})", to_delete_fks)
+            await self._db.execute(f"DELETE FROM proxy_state WHERE proxy_fk IN ({placeholders})", to_delete_fks)
+            await self._db.execute(f"DELETE FROM proxies WHERE id IN ({placeholders})", to_delete_fks)
+            await self._db.commit()
 
-        # Update cache
-        for pid in to_delete_ids:
-            self._proxy_cache.pop(pid, None)
+            # Update cache
+            for pid in to_delete_ids:
+                self._proxy_cache.pop(pid, None)
 
         return len(to_delete_ids)
 
