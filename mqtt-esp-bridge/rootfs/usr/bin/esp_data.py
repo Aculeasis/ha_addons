@@ -1,5 +1,4 @@
 import hashlib
-import uuid
 
 
 def ssd_one():
@@ -63,29 +62,7 @@ def ssd_one():
         {"name": "Warns", "icon": "hass:alert-circle-outline", "stat_t": "sata",
          "val_tpl": warns},
     ]
-    return discovery_adapter(uid, data=data, topic=topic, cfg_topic=cfg_topic, device=device)
 
-
-def discovery_adapter(uid: str, data=None, topic=None, cfg_topic=None, device=None, avty_t=False):
-    uid = uid.lower()
-    cfg_topic = cfg_topic or 'homeassistant/sensor/esp_{}/config'
-    topic = topic or 'dev/esp/sensor/esp_{}/'.format(uid)
-    device = device or {
-        "ids": uid, "name": "ESP sensor {}".format(uid), "sw": "1.0.0", "mdl": "ESP Sensor",
-        "mf": "Aculeasis"
-    }
-    data = data or [
-        {"unit_of_meas": "°C", "name": "Temperature", "dev_cla": "temperature", "stat_t": "temperature"},
-        {"unit_of_meas": "%", "name": "Humidity", "dev_cla": "humidity", "stat_t": "humidity"},
-        {
-            "unit_of_meas": "%", "name": "battery", "dev_cla": "battery", "stat_t": "battery",
-            'ent_cat': 'diagnostic', 'stat_cla': 'measurement'
-        },
-        {
-            "unit_of_meas": "V", "name": "voltage", "dev_cla": "voltage", "stat_t": "voltage",
-            'ent_cat': 'diagnostic', 'stat_cla': 'measurement'
-        },
-    ]
     result = {}
     for idx, cfg in enumerate(data):
         id_ = '{}_{}'.format(uid, idx)
@@ -93,8 +70,6 @@ def discovery_adapter(uid: str, data=None, topic=None, cfg_topic=None, device=No
                     'stat_t': topic + cfg['stat_t'],
                     'dev': device,
                     'name': '{}_{}'.format(cfg['name'], uid[-6:])})
-        if avty_t:
-            cfg['avty_t'] = 'dev/esp/availabilities/esp_{}'.format(uid)
         result[cfg_topic.format(id_)] = cfg
     return result
 

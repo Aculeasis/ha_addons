@@ -50,7 +50,6 @@ else
     SMART_DEVICE="/dev/sda"
 fi
 
-ESP_STAT_DATA="/data"
 echo "Starting Python script..."
 echo "MQTT: ${MQTT_HOST}:${MQTT_PORT} username: ${MQTT_USERNAME}"
 
@@ -59,19 +58,7 @@ export MQTT_USERNAME
 export MQTT_PASSWORD
 export MQTT_PORT
 
-export ESP_STAT_DATA
 export SMART_DEVICE
 
-# Function to handle signals and shut down background processes
-cleanup() {
-    echo "Stopping services..."
-    kill $(jobs -p)
-    exit 0
-}
 
-# Trap signals and run cleanup function
-trap 'cleanup' SIGTERM SIGHUP SIGINT
-exec python3 -u /usr/bin/mqtt_bridge_helper.py &
-exec /usr/bin/esp-stat -V &
-
-wait
+exec python3 -u /usr/bin/mqtt_bridge_helper.py
