@@ -7,7 +7,7 @@
   align-items: center;
   gap: 16px;
   padding: 12px 24px;
-  background: rgba(var(--bg-rgb), 0.97);
+  background: var(--bg2);
   border-bottom: 1px solid var(--border);
 }
 
@@ -146,9 +146,8 @@
 
 /* ─── Main layout ─────────────────────────────────────────────────── */
 .container {
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 24px;
+  width: 100%;
+  padding: 16px;
 }
 
 

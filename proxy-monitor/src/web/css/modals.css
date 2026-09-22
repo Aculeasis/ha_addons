@@ -46,6 +46,30 @@
   color: var(--danger);
 }
 
+/* In detail cards, latency severity is communicated by text color only. */
+.detail-info-block .dib-value.lat-good,
+.detail-info-block .dib-value.lat-mid,
+.detail-info-block .dib-value.lat-bad,
+.detail-info-block .dib-value.lat-none {
+  background: transparent;
+}
+
+.detail-info-block .dib-value.lat-good {
+  color: var(--success);
+}
+
+.detail-info-block .dib-value.lat-mid {
+  color: var(--warning);
+}
+
+.detail-info-block .dib-value.lat-bad {
+  color: var(--danger);
+}
+
+.detail-info-block .dib-value.lat-none {
+  color: var(--text3);
+}
+
 .chart-controls {
   display: flex;
   gap: 8px;

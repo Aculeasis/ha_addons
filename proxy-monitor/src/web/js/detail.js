@@ -332,7 +332,7 @@ function renderDetailChart(series) {
   const colorText = style.getPropertyValue('--text2').trim() || '#bdbdbd';
   const colorGrid = style.getPropertyValue('--border').trim() || 'rgba(255, 255, 255, 0.12)';
   const colorBg = style.getPropertyValue('--bg2').trim() || '#1c1c1c';
-  const colorAccent = style.getPropertyValue('--accent').trim() || '#03a9f4';
+  const colorChart = style.getPropertyValue('--chart').trim() || '#4269d0';
   const colorSuccess = style.getPropertyValue('--success').trim() || '#4caf50';
   const colorDanger = style.getPropertyValue('--danger').trim() || '#f44336';
 
@@ -359,8 +359,8 @@ function renderDetailChart(series) {
           label: 'Avg Latency (ms)',
           data: latencies,
           type: 'line',
-          borderColor: colorAccent,
-          backgroundColor: colorAccent + '1a', // 10% opacity
+          borderColor: colorChart,
+          backgroundColor: colorChart + '1a', // 10% opacity
           borderWidth: 2,
           pointRadius: 2,
           yAxisID: 'y2',
@@ -401,8 +401,8 @@ function renderDetailChart(series) {
         y2: {
           position: 'right',
           grid: { drawOnChartArea: false },
-          ticks: { color: colorAccent },
-          title: { display: true, text: 'Latency ms', color: colorAccent },
+          ticks: { color: colorChart },
+          title: { display: true, text: 'Latency ms', color: colorChart },
         },
       },
       plugins: {

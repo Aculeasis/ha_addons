@@ -255,8 +255,8 @@ function buildSparklineSvg(tcp, udp) {
   <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
     ${t ? `<polygon points="${t.fill}" fill="url(#sparkline-grad-tcp)"/>` : ''}
     ${u ? `<polygon points="${u.fill}" fill="url(#sparkline-grad-udp)"/>` : ''}
-    ${t ? `<polyline points="${t.pts}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
-    ${u ? `<polyline points="${u.pts}" fill="none" stroke="var(--accent2)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+    ${t ? `<polyline points="${t.pts}" fill="none" stroke="var(--chart)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+    ${u ? `<polyline points="${u.pts}" fill="none" stroke="var(--chart2)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
   </svg>`;
 }
 
