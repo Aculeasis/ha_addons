@@ -20,10 +20,6 @@
   overflow: hidden;
 }
 
-:root[data-theme="dark"] .proxy-card {
-  background: var(--glass);
-}
-
 .proxy-card:hover {
   box-shadow: var(--shadow);
   border-color: var(--border-accent);
@@ -151,9 +147,9 @@
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 10px;
-  background: rgba(91, 138, 245, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--accent);
-  border: 1px solid rgba(91, 138, 245, 0.2);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   line-height: 1;
@@ -207,15 +203,15 @@
 }
 
 .bar-high {
-  background: linear-gradient(90deg, var(--success), rgba(18, 216, 138, 0.5));
+  background: linear-gradient(90deg, var(--success), rgba(var(--success-rgb), 0.55));
 }
 
 .bar-mid {
-  background: linear-gradient(90deg, var(--warning), rgba(245, 168, 64, 0.5));
+  background: linear-gradient(90deg, var(--warning), rgba(var(--warning-rgb), 0.55));
 }
 
 .bar-low {
-  background: linear-gradient(90deg, #f57c40, rgba(245, 124, 64, 0.5));
+  background: linear-gradient(90deg, var(--orange), rgba(var(--orange-rgb), 0.55));
 }
 
 .bar-danger {
@@ -251,17 +247,17 @@
 
 .lat-good {
   color: var(--success);
-  background: rgba(18, 216, 138, 0.1);
+  background: rgba(var(--success-rgb), 0.14);
 }
 
 .lat-mid {
   color: var(--warning);
-  background: rgba(245, 168, 64, 0.1);
+  background: rgba(var(--warning-rgb), 0.14);
 }
 
 .lat-bad {
   color: var(--danger);
-  background: rgba(245, 74, 74, 0.1);
+  background: rgba(var(--danger-rgb), 0.14);
 }
 
 .lat-none {

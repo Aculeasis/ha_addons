@@ -304,9 +304,9 @@
 
 .dtp-btn.dtp-clear {
   color: var(--danger);
-  border-color: rgba(245, 74, 74, 0.3);
+  border-color: rgba(var(--danger-rgb), 0.35);
 }
 
 .dtp-btn.dtp-clear:hover {
-  background: rgba(245, 74, 74, 0.15);
+  background: rgba(var(--danger-rgb), 0.15);
 }

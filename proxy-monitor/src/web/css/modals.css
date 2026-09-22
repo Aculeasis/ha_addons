@@ -137,7 +137,7 @@
   color: var(--accent);
   margin-bottom: 12px;
   padding: 4px 8px;
-  background: rgba(91, 138, 245, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   border-radius: var(--radius-xs);
   display: inline-block;
 }
@@ -274,7 +274,7 @@
 .form-group input.invalid,
 .form-group select.invalid {
   border-color: var(--danger) !important;
-  box-shadow: 0 0 0 2px rgba(245, 74, 74, 0.15);
+  box-shadow: 0 0 0 2px rgba(var(--danger-rgb), 0.15);
 }
 
 .form-group input[type="checkbox"] {
@@ -376,7 +376,7 @@
 .btn-move:hover {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(91, 138, 245, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 @media (max-width: 480px) {

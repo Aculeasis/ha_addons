@@ -132,7 +132,7 @@ function buildDetailInfoHtml(proxy) {
     <div class="dib-label">Check types</div>
     <div class="dib-value" style="font-size:13px">${checks}</div>
   </div>
-  ${primaryError ? `<div class="detail-info-block" style="border-color:rgba(245,74,74,0.35)">
+  ${primaryError ? `<div class="detail-info-block" style="border-color:rgba(var(--danger-rgb),0.35)">
     <div class="dib-label" style="color:var(--danger)">Last error</div>
     <div class="dib-value" style="font-size:11px;color:var(--danger)">${esc(primaryError)}</div>
   </div>` : ''}`;
@@ -329,10 +329,12 @@ function renderDetailChart(series) {
   const ctx = canvas.getContext('2d');
 
   const style = getComputedStyle(document.documentElement);
-  const colorText = style.getPropertyValue('--text2').trim() || '#9090b8';
-  const colorGrid = style.getPropertyValue('--border').trim() || 'rgba(180, 180, 200, 0.1)';
-  const colorBg = style.getPropertyValue('--bg2').trim() || '#0d0d1f';
-  const colorAccent = style.getPropertyValue('--accent').trim() || '#5b8af5';
+  const colorText = style.getPropertyValue('--text2').trim() || '#bdbdbd';
+  const colorGrid = style.getPropertyValue('--border').trim() || 'rgba(255, 255, 255, 0.12)';
+  const colorBg = style.getPropertyValue('--bg2').trim() || '#1c1c1c';
+  const colorAccent = style.getPropertyValue('--accent').trim() || '#03a9f4';
+  const colorSuccess = style.getPropertyValue('--success').trim() || '#4caf50';
+  const colorDanger = style.getPropertyValue('--danger').trim() || '#f44336';
 
   state.detailChart = new Chart(ctx, {
     type: 'bar',
@@ -342,14 +344,14 @@ function renderDetailChart(series) {
         {
           label: 'Success',
           data: successes,
-          backgroundColor: 'rgba(18,216,138,0.7)',
+          backgroundColor: colorSuccess,
           stack: 'checks',
           order: 2,
         },
         {
           label: 'Failures',
           data: failures,
-          backgroundColor: 'rgba(245,74,74,0.7)',
+          backgroundColor: colorDanger,
           stack: 'checks',
           order: 2,
         },

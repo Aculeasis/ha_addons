@@ -413,7 +413,7 @@ function deleteProxy(index) {
   if (!container) return;
 
   container.innerHTML = `
-  <div class="proxy-edit-form" style="border-color: rgba(245,74,74,0.35);">
+  <div class="proxy-edit-form" style="border-color: rgba(var(--danger-rgb),0.35);">
     <h4 style="color: var(--danger);">Confirm Deletion</h4>
     <p style="margin-top: 8px;">Are you sure you want to delete proxy "<strong>${esc(p.name || '')}</strong>"?</p>
     <div style="display:flex;gap:8px;margin-top:14px">
