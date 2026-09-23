@@ -1,0 +1,8 @@
+.ha-frontend-reference
+.local-test
+.venv
+frontend/node_modules
+src/web
+proxy_data.db
+*.db
+.git

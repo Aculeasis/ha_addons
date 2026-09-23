@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#202020" />
+    <link rel="icon" href="./icon.png" type="image/png" />
+    <title>Proxy Monitor</title>
+    <meta name="description" content="SOCKS5 proxy monitoring dashboard" />
+    <script>
+      // Ingress normally includes the trailing slash. Keep relative Vite assets
+      // correct when its URL is opened without one.
+      if (!location.pathname.endsWith('/')) {
+        location.replace(location.pathname + '/' + location.search + location.hash);
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

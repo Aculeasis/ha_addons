@@ -9,6 +9,10 @@ venv/
 env/
 *.egg-info/
 dist/
+node_modules/
+proxy-monitor/.ha-frontend-reference/
+proxy-monitor/.local-test/
+proxy-monitor/src/web/
 build/
 
 # Data

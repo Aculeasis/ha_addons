@@ -1,4 +1,11 @@
 ARG BUILD_FROM
+FROM node:24-alpine AS frontend-build
+WORKDIR /build/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
 FROM $BUILD_FROM
 LABEL org.opencontainers.image.source=https://github.com/Aculeasis/ha_addons
 
@@ -19,6 +26,7 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Copy source code
 COPY src /usr/src/app
+COPY --from=frontend-build /build/src/web /usr/src/app/web
 
 # Copy rootfs
 COPY rootfs /
