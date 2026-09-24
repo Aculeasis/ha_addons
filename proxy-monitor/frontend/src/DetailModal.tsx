@@ -70,7 +70,7 @@ function LatencyChart({ series, groupBy, timeFormat, theme, onHour }: {
     });
     return () => { cancelAnimationFrame(startFrame); cancelAnimationFrame(updateFrame); chart.destroy(); };
   }, [series, groupBy, timeFormat, theme, onHour]);
-  return <canvas ref={canvas} />;
+  return <canvas ref={canvas} role="img" aria-label="Checks and average latency over time; values are available in the data table below" />;
 }
 
 export function DetailModal({ proxy, meta, token, theme, onClose, onError }: {
@@ -83,6 +83,7 @@ export function DetailModal({ proxy, meta, token, theme, onClose, onError }: {
   const [toTs, setToTs] = useState<number | undefined>();
   const [series, setSeries] = useState<ChartPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showTable, setShowTable] = useState(false);
   const last = proxy.stats.last_checks?.[type];
   const total = proxy.stats.total?.[type];
   const otherType: CheckType = type === 'tcp' ? 'udp' : 'tcp';
@@ -105,7 +106,7 @@ export function DetailModal({ proxy, meta, token, theme, onClose, onError }: {
   const drillDown = useCallback((ts: number) => {
     setFromTs(ts); setToTs(ts + 3600); setGroupBy('minute');
   }, []);
-  return <Modal title={proxy.name} onClose={onClose} size="large">
+  return <Modal title={proxy.name} privateTitle onClose={onClose} size="large">
     <div class="detail-info-grid">
       <Info label={`${type.toUpperCase()} status`} value={checkStatus} className={checkStatusClass} />
       <Info label="Address" value={`${proxy.host}:${proxy.port}`} className="privacy mono" />
@@ -122,7 +123,9 @@ export function DetailModal({ proxy, meta, token, theme, onClose, onError }: {
       </div></div>}
       <div class="chart-control-group"><div class="segmented" role="group" aria-label="History range">
         {([[1, '1h'], [6, '6h'], [24, '24h'], [168, '7d'], [720, '30d']] as const).map(([value, label]) =>
-          <button key={value} class={hours === value && fromTs === undefined ? 'active' : ''} onClick={() => { setHours(value); setRange(); }}>{label}</button>)}
+          <button key={value} class={hours === value && fromTs === undefined ? 'active' : ''} disabled={value > meta.retention_days * 24}
+            title={value > meta.retention_days * 24 ? `Only ${meta.retention_days} days of history are retained` : undefined}
+            onClick={() => { setHours(value); setRange(); }}>{label}</button>)}
       </div></div>
       <div class="chart-control-group"><div class="segmented" role="group" aria-label="Grouping">
         {(['minute', 'hour', 'day'] as const).map(value => <button key={value} class={groupBy === value ? 'active' : ''} onClick={() => setGroupBy(value)}>{value}</button>)}
@@ -134,5 +137,16 @@ export function DetailModal({ proxy, meta, token, theme, onClose, onError }: {
       {!loading && !series.length && <div class="chart-empty">No history for this range</div>}
       {!loading && series.length > 0 && <LatencyChart series={series} groupBy={groupBy} timeFormat={meta.time_format} theme={theme} onHour={drillDown} />}
     </div>
+    <button class="chart-table-toggle btn btn-ghost btn-sm" aria-expanded={showTable} onClick={() => setShowTable(value => !value)}>
+      {showTable ? 'Hide data table' : 'Show data table'}
+    </button>
+    {showTable && <div class="chart-data-table-wrap"><table class="chart-data-table">
+      <caption>{type.toUpperCase()} history by {groupBy}</caption>
+      <thead><tr><th scope="col">Time</th><th scope="col">Success</th><th scope="col">Failures</th><th scope="col">Avg latency</th><th scope="col">Min</th><th scope="col">Max</th></tr></thead>
+      <tbody>{series.map(point => <tr key={point.ts}>
+        <th scope="row">{new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short', hour12: meta.time_format === '12h' }).format(point.ts * 1000)}</th>
+        <td>{point.successes}</td><td>{point.failures}</td><td>{latency(point.avg_latency)}</td><td>{latency(point.min_latency)}</td><td>{latency(point.max_latency)}</td>
+      </tr>)}</tbody>
+    </table>{!loading && !series.length && <p class="muted">No history for this range.</p>}</div>}
   </Modal>;
 }

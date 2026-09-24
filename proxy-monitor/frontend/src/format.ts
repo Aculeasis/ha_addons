@@ -25,11 +25,14 @@ export function latencyLevel(ms: number | null | undefined): string {
   return ms < 500 ? 'success' : ms < 2000 ? 'warning' : 'danger';
 }
 
-export function sparkline(points?: SparkPoint[]): string | undefined {
-  if (!points || points.length < 2) return undefined;
-  return points.map((point, index) => {
+export function sparkline(points?: SparkPoint[], recent?: CheckCount): string | undefined {
+  if (!points || !recent || recent.total < 2 || points.length < recent.total) return undefined;
+  const visible = points.slice(-recent.total);
+  if (visible.reduce((sum, point) => sum + point.success, 0) !== recent.success ||
+      visible.reduce((sum, point) => sum + point.fail, 0) !== recent.fail) return undefined;
+  return visible.map((point, index) => {
     const total = point.success + point.fail;
-    const x = 2 + index * 296 / (points.length - 1);
+    const x = 2 + index * 296 / (visible.length - 1);
     const y = 37 - (total ? point.success / total : 0) * 34;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');

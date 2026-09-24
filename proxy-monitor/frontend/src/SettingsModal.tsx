@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api } from './api';
+import { DragHandle } from './DragHandle';
 import { Modal } from './Modal';
 import type { Config, ProxyConfig } from './types';
 
@@ -22,8 +23,8 @@ function SectionTitle({ title, icon }: { title: string; icon: 'proxies' | 'monit
   </svg>{title}</h3>;
 }
 
-function ProxyEditor({ initial, onSave, onCancel }: {
-  initial: ProxyConfig; onSave: (proxy: ProxyConfig) => void; onCancel: () => void;
+function ProxyEditor({ initial, mode, onSave, onCancel }: {
+  initial: ProxyConfig; mode: 'add' | 'edit' | 'copy'; onSave: (proxy: ProxyConfig) => string | undefined; onCancel: () => void;
 }) {
   const [value, setValue] = useState<ProxyConfig>({ ...initial, tags: [...(initial.tags ?? [])] });
   const [tagText, setTagText] = useState('');
@@ -46,10 +47,11 @@ function ProxyEditor({ initial, onSave, onCancel }: {
       setError('Name, host and a port from 1 to 65535 are required.');
       return;
     }
-    onSave({ ...value, name: value.name.trim(), host: value.host.trim(), port: Number(value.port), tags: [...new Set([...value.tags, ...tagText.split(',')].map(tag => tag.trim()).filter(Boolean))] });
+    const message = onSave({ ...value, name: value.name.trim(), host: value.host.trim(), port: Number(value.port), tags: [...new Set([...value.tags, ...tagText.split(',')].map(tag => tag.trim()).filter(Boolean))] });
+    if (message) setError(message);
   };
   return <div class="proxy-editor">
-    <h4>{initial.name ? 'Edit proxy' : 'Add proxy'}</h4>
+    <h4>{mode === 'copy' ? 'Copy proxy' : mode === 'edit' ? 'Edit proxy' : 'Add proxy'}</h4>
     <div class="form-grid">
       <label class="field">Name *<input value={value.name} onInput={event => field('name', event.currentTarget.value)} /></label>
       <label class="field">Host *<input value={value.host} onInput={event => field('host', event.currentTarget.value)} /></label>
@@ -77,12 +79,20 @@ function ProxyEditor({ initial, onSave, onCancel }: {
   </div>;
 }
 
-export function SettingsModal({ token, safeguard, onClose, onSaved, onError, notify }: {
-  token: string; safeguard: boolean; onClose: () => void; onSaved: () => void;
+export function SettingsModal({ token, safeguard, viewMode, onViewChange, onClose, onSaved, onError, notify }: {
+  token: string; safeguard: boolean; viewMode: 'cards' | 'table'; onViewChange: (view: 'cards' | 'table') => void;
+  onClose: () => void; onSaved: () => void;
   onError: (error: unknown) => void; notify: (kind: 'success' | 'info' | 'error', message: string) => void;
 }) {
   const [draft, setDraft] = useState<Config | null>(null);
+  const original = useRef<Config | null>(null);
   const [size, setSize] = useState('');
+  const [draftView, setDraftView] = useState(viewMode);
+  const [proxySearch, setProxySearch] = useState('');
+  const [newInitial, setNewInitial] = useState<ProxyConfig>(blankProxy());
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [discardConfirm, setDiscardConfirm] = useState(false);
   const [trustedText, setTrustedText] = useState('');
   const [whitelistText, setWhitelistText] = useState('');
   const [editing, setEditing] = useState<number | 'new' | null>(null);
@@ -90,11 +100,27 @@ export function SettingsModal({ token, safeguard, onClose, onSaved, onError, not
   const [saving, setSaving] = useState(false);
   const [vacuuming, setVacuuming] = useState(false);
   const [error, setError] = useState('');
+  const settingsContent = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || !/^[1-4]$/.test(event.key)) return;
+      if (document.querySelectorAll('.modal').length > 1) return;
+      const section = settingsContent.current?.querySelectorAll<HTMLElement>(':scope > .settings-section')[Number(event.key) - 1];
+      if (!section) return;
+      event.preventDefault();
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    document.addEventListener('keydown', keydown);
+    return () => document.removeEventListener('keydown', keydown);
+  }, []);
 
   useEffect(() => {
     let active = true;
     Promise.all([api.config(token), api.dbSize(token)]).then(([config, db]) => {
       if (active) {
+        original.current = structuredClone({ ...config, server: { ...config.server,
+          trusted_ips: config.server.trusted_ips ?? [], whitelist: config.server.whitelist ?? [] } });
         setDraft(structuredClone(config));
         setSize(db.formatted);
         setTrustedText((config.server.trusted_ips ?? []).join('\n'));
@@ -108,18 +134,22 @@ export function SettingsModal({ token, safeguard, onClose, onSaved, onError, not
     setDraft(current => current ? { ...current, [section]: { ...current[section], [key]: value } } as Config : null);
   };
   const updateProxies = (proxies: ProxyConfig[]) => setDraft(current => current ? { ...current, proxies } : null);
-  const move = (index: number, by: number) => {
+  const moveTo = (index: number, to: number) => {
     if (!draft) return;
-    const to = index + by;
     if (to < 0 || to >= draft.proxies.length) return;
     const proxies = [...draft.proxies];
-    [proxies[index], proxies[to]] = [proxies[to]!, proxies[index]!];
+    proxies.splice(to, 0, ...proxies.splice(index, 1));
     updateProxies(proxies);
     setEditing(null);
     setDeleting(null);
+    setDraggingIndex(null);
+    setOverIndex(null);
   };
-  const saveProxy = (proxy: ProxyConfig) => {
+  const saveProxy = (proxy: ProxyConfig): string | undefined => {
     if (!draft) return;
+    if (draft.proxies.some((item, index) => index !== editing && item.host.trim() === proxy.host && item.port === proxy.port)) {
+      return 'A proxy with this host and port already exists.';
+    }
     const proxies = [...draft.proxies];
     if (editing === 'new') proxies.push(proxy);
     else if (typeof editing === 'number') proxies[editing] = proxy;
@@ -127,6 +157,10 @@ export function SettingsModal({ token, safeguard, onClose, onSaved, onError, not
     setEditing(null);
     notify('info', `Proxy ${editing === 'new' ? 'added' : 'updated'} in draft. Save settings to apply.`);
   };
+  const configForSave = () => draft ? { ...draft, server: { ...draft.server, trusted_ips: lines(trustedText), whitelist: lines(whitelistText) } } : null;
+  const configDirty = !!draft && JSON.stringify(configForSave()) !== JSON.stringify(original.current);
+  const dirty = configDirty || draftView !== viewMode || editing !== null || deleting !== null;
+  const requestClose = () => dirty ? setDiscardConfirm(true) : onClose();
   const save = async () => {
     if (!draft) return;
     const numericFields: Array<[number, number, number]> = [
@@ -149,8 +183,11 @@ export function SettingsModal({ token, safeguard, onClose, onSaved, onError, not
     setSaving(true);
     setError('');
     try {
-      await api.saveConfig(token, { ...draft, server: { ...draft.server, trusted_ips: lines(trustedText), whitelist: lines(whitelistText) } });
-      notify('success', 'Settings saved, monitoring restarted');
+      if (configDirty) {
+        await api.saveConfig(token, configForSave()!);
+        notify('success', 'Settings saved');
+      }
+      onViewChange(draftView);
       onSaved();
     } catch (err) { onError(err); }
     finally { setSaving(false); }
@@ -165,40 +202,63 @@ export function SettingsModal({ token, safeguard, onClose, onSaved, onError, not
     finally { setVacuuming(false); }
   };
 
-  return <Modal title="Settings" onClose={onClose} size="medium" footer={<>
-    <button class="btn btn-ghost" onClick={onClose}>Cancel</button>
-    <button class="btn btn-primary" disabled={!draft || saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
+  return <><Modal title="Settings" onClose={requestClose} size="medium" footer={<>
+    <button class="btn btn-ghost" onClick={requestClose}>Cancel</button>
+    <button class="btn btn-primary" disabled={!draft || saving || editing !== null || deleting !== null} onClick={save}
+      title={editing !== null || deleting !== null ? 'Finish editing the proxy first' : undefined}>{saving ? 'Saving…' : 'Save'}</button>
   </>}>
-    {!draft ? <div class="loading-panel"><div class="spinner" /> Loading settings…</div> : <div class="settings-content">
+    {!draft ? <div class="loading-panel"><div class="spinner" /> Loading settings…</div> : <div class="settings-content" ref={settingsContent}>
       <section class="settings-section proxies-section">
-        <SectionTitle title="Proxies" icon="proxies" />
+        <div class="section-heading"><SectionTitle title="Proxies" icon="proxies" />
+          <input class="settings-proxy-search" type="search" aria-label="Search configured proxies" placeholder="Search proxies" value={proxySearch}
+            onInput={event => setProxySearch(event.currentTarget.value)} />
+        </div>
         <div class="proxy-list">
-          {draft.proxies.map((proxy, index) => <div key={`${proxy.host}:${proxy.port}:${index}`}>
-            <div class="proxy-item">
-              <div class="proxy-item-info"><div class="proxy-item-head"><strong>{proxy.name}</strong>
+          {draft.proxies.map((proxy, index) => ({ proxy, index })).filter(({ proxy }) => !proxySearch.trim() ||
+            [proxy.name, proxy.host, ...(proxy.tags ?? [])].some(value => value.toLocaleLowerCase().includes(proxySearch.trim().toLocaleLowerCase())))
+            .map(({ proxy, index }) => <div key={`${proxy.host}:${proxy.port}`} onDragOver={event => {
+              if (proxySearch || draggingIndex === null || draggingIndex === index) return;
+              event.preventDefault(); setOverIndex(index);
+            }} onDrop={event => { event.preventDefault(); if (draggingIndex !== null) moveTo(draggingIndex, index); }}>
+            <div class={`proxy-item ${overIndex === index ? 'drag-over' : ''}`}>
+              <DragHandle label={`Move ${proxy.name}; use arrow keys to reorder`} disabled={!!proxySearch}
+                onDragStart={event => { event.dataTransfer?.setData('text/plain', String(index)); setDraggingIndex(index); }}
+                onDragEnd={() => { setDraggingIndex(null); setOverIndex(null); }}
+                onKeyDown={event => {
+                  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                  event.preventDefault(); moveTo(index, index + (event.key === 'ArrowUp' ? -1 : 1));
+                }} />
+              <div class="proxy-item-info"><div class="proxy-item-head"><strong class="privacy">{proxy.name}</strong>
                 {proxy.tcp_check && <span class="proxy-type-badge">TCP</span>}
                 {proxy.udp_check && <span class="proxy-type-badge">UDP</span>}
               </div><span class="privacy">{proxy.host}:{proxy.port}</span></div>
               <div class="proxy-item-actions">
-                <button class="icon-button" aria-label={`Move ${proxy.name} up`} disabled={index === 0} onClick={() => move(index, -1)}>↑</button>
-                <button class="icon-button" aria-label={`Move ${proxy.name} down`} disabled={index === draft.proxies.length - 1} onClick={() => move(index, 1)}>↓</button>
+                <button class="icon-button" aria-label={`Move ${proxy.name} up`} disabled={index === 0} onClick={() => moveTo(index, index - 1)}>↑</button>
+                <button class="icon-button" aria-label={`Move ${proxy.name} down`} disabled={index === draft.proxies.length - 1} onClick={() => moveTo(index, index + 1)}>↓</button>
                 <button class="btn btn-ghost btn-sm" onClick={() => { setEditing(index); setDeleting(null); }}>Edit</button>
+                <button class="btn btn-ghost btn-sm" onClick={() => { setNewInitial({ ...proxy, name: `${proxy.name} copy`, tags: [...proxy.tags] }); setEditing('new'); setDeleting(null); }}>Copy</button>
                 <button class="icon-button danger" aria-label={`Delete ${proxy.name}`} onClick={() => { setDeleting(index); setEditing(null); }}>✕</button>
               </div>
             </div>
-            {editing === index && <ProxyEditor key={`edit-${index}`} initial={proxy} onSave={saveProxy} onCancel={() => setEditing(null)} />}
+            {editing === index && <ProxyEditor key={`edit-${index}`} initial={proxy} mode="edit" onSave={saveProxy} onCancel={() => setEditing(null)} />}
             {deleting === index && <div class="confirm-delete">Delete <strong>{proxy.name}</strong> from the draft?
               <button class="btn btn-danger btn-sm" onClick={() => { updateProxies(draft.proxies.filter((_, i) => i !== index)); setDeleting(null); }}>Delete</button>
               <button class="btn btn-ghost btn-sm" onClick={() => setDeleting(null)}>Cancel</button>
             </div>}
           </div>)}
           {!draft.proxies.length && <p class="muted">No proxies configured.</p>}
+          {!!draft.proxies.length && !!proxySearch && !draft.proxies.some(proxy =>
+            [proxy.name, proxy.host, ...(proxy.tags ?? [])].some(value => value.toLocaleLowerCase().includes(proxySearch.trim().toLocaleLowerCase()))) &&
+            <p class="muted">No matching proxies.</p>}
         </div>
-        {editing === 'new' && <ProxyEditor key="new" initial={blankProxy()} onSave={saveProxy} onCancel={() => setEditing(null)} />}
-        <button class="btn btn-ghost btn-sm add-proxy-button" onClick={() => { setEditing('new'); setDeleting(null); }}>+ Add proxy</button>
+        {editing === 'new' && <ProxyEditor key={newInitial.name || 'new'} initial={newInitial} mode={newInitial.name ? 'copy' : 'add'} onSave={saveProxy} onCancel={() => setEditing(null)} />}
+        <button class="btn btn-ghost btn-sm add-proxy-button" onClick={() => { setNewInitial(blankProxy()); setEditing('new'); setDeleting(null); }}>+ Add proxy</button>
       </section>
 
-      <section class="settings-section monitoring-section"><SectionTitle title="Monitoring" icon="monitoring" /><div class="form-grid">
+      <section class="settings-section monitoring-section"><SectionTitle title="Monitoring" icon="monitoring" />
+        <label class="field dashboard-view-field">Dashboard view<select value={draftView} onChange={event => setDraftView(event.currentTarget.value as 'cards' | 'table')}>
+          <option value="cards">Cards</option><option value="table">Compact table</option></select></label>
+        <div class="form-grid">
         <label class="field">Check interval (sec)<input type="number" min="5" value={draft.monitoring.check_interval_seconds ?? 60} onInput={e => patch('monitoring', 'check_interval_seconds', Number(e.currentTarget.value))} /></label>
         <label class="field">Timeout (sec)<input type="number" min="1" value={draft.monitoring.check_timeout_seconds ?? 10} onInput={e => patch('monitoring', 'check_timeout_seconds', Number(e.currentTarget.value))} /></label>
         <label class="field">Concurrent checks<input type="number" min="1" value={draft.monitoring.concurrent_checks ?? 10} onInput={e => patch('monitoring', 'concurrent_checks', Number(e.currentTarget.value))} /></label>
@@ -225,5 +285,10 @@ export function SettingsModal({ token, safeguard, onClose, onSaved, onError, not
       </div></section>
       {error && <p class="form-error">{error}</p>}
     </div>}
-  </Modal>;
+  </Modal>
+    {discardConfirm && <Modal title="Discard changes?" size="small" onClose={() => setDiscardConfirm(false)} footer={<>
+      <button class="btn btn-ghost" onClick={() => setDiscardConfirm(false)}>Keep editing</button>
+      <button class="btn btn-danger" onClick={onClose}>Discard changes</button>
+    </>}><p>Your unsaved settings will be lost.</p></Modal>}
+  </>;
 }

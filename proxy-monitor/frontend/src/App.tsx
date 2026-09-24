@@ -41,7 +41,6 @@ function Login({ onLogin }: { onLogin: (username: string, password: string) => P
   };
   return <Modal title="Sign in" onClose={() => {}} size="small" dismissible={false}>
     <form class="login-form" onSubmit={submit}>
-      <div class="login-mark">◉</div>
       <label class="field">Username<input autoComplete="username" value={username} onInput={event => setUsername(event.currentTarget.value)} /></label>
       <label class="field">Password<input type="password" autoComplete="current-password" value={password} onInput={event => setPassword(event.currentTarget.value)} /></label>
       {error && <p class="form-error">{error}</p>}
@@ -56,6 +55,17 @@ export function App() {
   const [safeguard, setSafeguard] = useState(false);
   const [data, setData] = useState<StatsData | null>(null);
   const [connected, setConnected] = useState(false);
+  const [reconnectKey, setReconnectKey] = useState(0);
+  const [now, setNow] = useState(Date.now());
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'alive' | 'partial' | 'dead'>('all');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => localStorage.getItem('pm_view') === 'table' ? 'table' : 'cards');
+  const [orderedIds, setOrderedIds] = useState<string[] | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [openingSettings, setOpeningSettings] = useState(false);
+  const pendingOrder = useRef<string[] | null>(null);
+  const orderTimer = useRef<number | undefined>(undefined);
+  const orderQueue = useRef<Promise<void>>(Promise.resolve());
   const [detailId, setDetailId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => {
@@ -74,7 +84,7 @@ export function App() {
     setToasts(current => [...current, { id, kind, message }]);
     window.setTimeout(() => setToasts(current => current.filter(item => item.id !== id)), 4500);
   };
-  const logout = () => { sessionStorage.removeItem('pm_token'); setToken(''); setAuthRequired(true); setData(null); };
+  const logout = () => { window.clearTimeout(orderTimer.current); pendingOrder.current = null; sessionStorage.removeItem('pm_token'); setToken(''); setAuthRequired(true); setData(null); };
   const handleError = (error: unknown) => {
     if (error instanceof UnauthorizedError) logout();
     else notify('error', error instanceof Error ? error.message : 'Request failed');
@@ -104,17 +114,51 @@ export function App() {
 
   useEffect(() => {
     if (authRequired === null || (authRequired && !token)) return;
+    setConnected(false);
     api.stats(token).then(setData).catch(handleError);
     return connectStats(token, { onStats: setData, onConnection: setConnected, onUnauthorized: logout });
-  }, [authRequired, token]);
+  }, [authRequired, token, reconnectKey]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => { localStorage.setItem('pm_view', viewMode); }, [viewMode]);
+  useEffect(() => () => window.clearTimeout(orderTimer.current), []);
+
+  const flushOrder = (): Promise<void> => {
+    window.clearTimeout(orderTimer.current);
+    const ids = pendingOrder.current;
+    if (!ids) return orderQueue.current;
+    pendingOrder.current = null;
+    const task = orderQueue.current.then(async () => {
+      setSavingOrder(true);
+      const config = await api.config(token);
+      const rank = new Map(ids.map((id, index) => [id, index]));
+      const proxies = [...config.proxies].sort((a, b) =>
+        (rank.get(`${a.host}:${a.port}`) ?? Infinity) - (rank.get(`${b.host}:${b.port}`) ?? Infinity));
+      await api.saveConfig(token, { ...config, proxies });
+    }).catch(error => { setOrderedIds(null); handleError(error); })
+      .finally(() => setSavingOrder(false));
+    orderQueue.current = task;
+    return task;
+  };
+  const reorder = (ids: string[]) => {
+    setOrderedIds(ids);
+    pendingOrder.current = ids;
+    window.clearTimeout(orderTimer.current);
+    orderTimer.current = window.setTimeout(() => { void flushOrder(); }, 700);
+  };
+  const openSettings = async () => {
+    setOpeningSettings(true);
+    await flushOrder();
+    setOpeningSettings(false);
+    setSettingsOpen(true);
+  };
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (detailId) setDetailId(null);
-        else if (settingsOpen) setSettingsOpen(false);
-        else setThemeMenu(false);
-      }
+      if (event.key === 'Escape' && !detailId && !settingsOpen) setThemeMenu(false);
     };
     document.addEventListener('keydown', keydown);
     return () => document.removeEventListener('keydown', keydown);
@@ -136,20 +180,28 @@ export function App() {
   };
   const proxy = data?.proxies.find(item => item.id === detailId);
   const summary = data?.summary;
+  const stale = !!data && now - data.last_updated * 1000 > Math.max(60000, data.meta.check_interval * 2000);
+  const lastUpdateTime = data ? new Date(data.last_updated * 1000).toLocaleTimeString(undefined,
+    { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: data.meta.time_format === '12h' }) : '—';
   const names = (status: 'alive' | 'partial' | 'dead') => data?.proxies.filter(item => proxyStatus(item) === status).map(item => item.name).join('\n') ?? '';
 
   return <>
     <header class="app-bar">
       <div class="app-title"><span class="app-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /></svg></span><span>Proxy Monitor</span></div>
       <div class="status-summary" aria-label="Proxy summary">
-        <span class="summary-pill total">Total: <strong>{summary?.total ?? '—'}</strong></span>
-        <span class="summary-pill alive" title={names('alive')}><span class="summary-indicator" />Alive: <strong>{summary?.alive ?? '—'}</strong></span>
-        <span class="summary-pill partial" title={names('partial')}><span class="summary-indicator" />Partial: <strong>{summary?.partial ?? '—'}</strong></span>
-        <span class="summary-pill dead" title={names('dead')}><span class="summary-indicator" />Dead: <strong>{summary?.dead ?? '—'}</strong></span>
+        <button class={`summary-pill total ${statusFilter === 'all' ? 'selected' : ''}`} aria-pressed={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>Total: <strong>{summary?.total ?? '—'}</strong></button>
+        {(['alive', 'partial', 'dead'] as const).map(status => <button key={status}
+          class={`summary-pill ${status} ${statusFilter === status ? 'selected' : ''}`} title={privacy ? undefined : names(status)}
+          aria-pressed={statusFilter === status} onClick={() => setStatusFilter(current => current === status ? 'all' : status)}>
+          <span class="summary-indicator" />{status.charAt(0).toUpperCase() + status.slice(1)}: <strong>{summary?.[status] ?? '—'}</strong>
+        </button>)}
       </div>
+      <label class="header-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
+        <input type="search" aria-label="Search proxies" placeholder="Search" value={query} onInput={event => setQuery(event.currentTarget.value)} />
+      </label>
       <div class="app-actions">
-        <span class={`connection-dot ${connected ? 'connected' : ''}`} title={connected ? 'Live connection active' : 'Reconnecting'} />
-        <span class="updated-at">{data ? `Updated ${new Date(data.last_updated * 1000).toLocaleTimeString([], { hour12: data.meta.time_format === '12h' })}` : 'Connecting…'}</span>
+        <span class="updated-at" aria-label={data ? `Last update ${lastUpdateTime}` : 'Waiting for update'}>{lastUpdateTime}</span>
+        <span class={`connection-dot ${connected && !stale ? 'connected' : ''}`} title={connected ? stale ? 'Data is stale' : 'Live connection active' : 'Reconnecting'} />
         <div class="theme-control" ref={themeControl}>
           <button class="icon-button toolbar-icon" title={`Theme: ${theme}`} aria-label="Theme" aria-expanded={themeMenu} onClick={() => setThemeMenu(!themeMenu)}><ThemeIcon theme={theme} /></button>
           {themeMenu && <div class="theme-menu">
@@ -157,12 +209,17 @@ export function App() {
           </div>}
         </div>
         <button class="icon-button toolbar-icon" title={privacy ? 'Disable privacy mode' : 'Enable privacy mode'} aria-label={privacy ? 'Disable privacy mode' : 'Enable privacy mode'} aria-pressed={privacy} onClick={() => setPrivacy(!privacy)}><PrivacyIcon hidden={privacy} /></button>
-        <button class="btn btn-ghost settings-button" onClick={() => setSettingsOpen(true)} aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></svg><span>Settings</span></button>
+        <button class="btn btn-ghost settings-button" disabled={openingSettings} onClick={() => void openSettings()} aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></svg><span>Settings</span></button>
       </div>
     </header>
-    <main class="page-content"><Dashboard data={data} onOpen={setDetailId} /></main>
+    {data && (!connected || stale || savingOrder) && <div class={`connection-banner ${savingOrder && connected && !stale ? 'saving' : ''}`} role="status">
+      <span>{savingOrder && connected && !stale ? 'Saving proxy order…' : `${connected ? 'Data is stale' : 'Connection lost'} · Last update ${new Date(data.last_updated * 1000).toLocaleTimeString()}`}</span>
+      {(!connected || stale) && <button class="btn btn-ghost btn-sm" onClick={() => setReconnectKey(value => value + 1)}>Retry now</button>}
+    </div>}
+    <main class="page-content"><Dashboard data={data} orderedIds={orderedIds} query={query} statusFilter={statusFilter} privacy={privacy} viewMode={viewMode} onOpen={setDetailId} onReorder={reorder} /></main>
     {proxy && data && <DetailModal key={proxy.id} proxy={proxy} meta={data.meta} token={token} theme={resolvedTheme} onClose={() => setDetailId(null)} onError={handleError} />}
-    {settingsOpen && <SettingsModal token={token} safeguard={safeguard} onClose={() => setSettingsOpen(false)} onSaved={() => setSettingsOpen(false)} onError={handleError} notify={notify} />}
+    {settingsOpen && <SettingsModal token={token} safeguard={safeguard} viewMode={viewMode} onViewChange={setViewMode}
+      onClose={() => setSettingsOpen(false)} onSaved={() => { setSettingsOpen(false); setOrderedIds(null); }} onError={handleError} notify={notify} />}
     {authRequired && !token && <Login onLogin={login} />}
     <div class="toast-stack" aria-live="polite">{toasts.map(item => <div class={`toast ${item.kind}`} key={item.id}>{item.message}</div>)}</div>
   </>;

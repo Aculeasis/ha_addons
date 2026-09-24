@@ -100,14 +100,14 @@ export function DateRangePicker({ fromTs, toTs, hours, retentionDays, onChange }
   };
   const chooseDay = (day: Date) => {
     if (!choosingEnd || !draftStart) {
-      setDraftStart(startOfDay(day));
+      setDraftStart(new Date(Math.max(startOfDay(day).getTime(), earliest.getTime())));
       setDraftEnd(undefined);
       setChoosingEnd(true);
     } else {
       const end = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59);
       if (day < startOfDay(draftStart)) {
         setDraftEnd(new Date(draftStart.getFullYear(), draftStart.getMonth(), draftStart.getDate(), 23, 59));
-        setDraftStart(startOfDay(day));
+        setDraftStart(new Date(Math.max(startOfDay(day).getTime(), earliest.getTime())));
       } else setDraftEnd(end > new Date() ? new Date() : end);
       setChoosingEnd(false);
     }
@@ -144,6 +144,7 @@ export function DateRangePicker({ fromTs, toTs, hours, retentionDays, onChange }
   const earliestMonth = new Date(earliest.getFullYear(), earliest.getMonth(), 1);
   const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const valid = !!draftStart && !!draftEnd && draftEnd > draftStart && draftEnd <= now && draftStart >= earliest;
+  const earliestLabel = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(earliest);
 
   return <>
     <div class="range-trigger" ref={trigger}>
@@ -156,7 +157,11 @@ export function DateRangePicker({ fromTs, toTs, hours, retentionDays, onChange }
     </div>
     {open && createPortal(<div class="range-popover" ref={panel} style={{ top: position.top, left: position.left, width: position.width }} role="dialog" aria-label="Select date range">
       <div class="range-picker-body">
-        <div class="range-presets">{presets.map(([value, label]) => <button type="button" key={value} onClick={() => choosePreset(value)}>{label}</button>)}</div>
+        <div class="range-presets">{presets.map(([value, label]) => {
+          const unavailable = presetRange(value, now).start < earliest;
+          return <button type="button" key={value} disabled={unavailable} title={unavailable ? `History is available from ${earliestLabel}` : undefined}
+            onClick={() => choosePreset(value)}>{label}</button>;
+        })}</div>
         <div class="range-calendar">
           <div class="range-month-heading">
             <button type="button" aria-label="Previous month" disabled={monthStart <= earliestMonth} onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button>
@@ -182,7 +187,8 @@ export function DateRangePicker({ fromTs, toTs, hours, retentionDays, onChange }
           </div>
         </div>
       </div>
-      <div class="range-picker-footer"><button type="button" class="text-button" onClick={() => setOpen(false)}>Cancel</button><button type="button" class="btn btn-primary" disabled={!valid} onClick={apply}>Select</button></div>
+      <div class="range-picker-footer"><span class="range-hint">History available from {earliestLabel}</span>
+        <button type="button" class="text-button" onClick={() => setOpen(false)}>Cancel</button><button type="button" class="btn btn-primary" disabled={!valid} onClick={apply}>Select</button></div>
     </div>, document.body)}
   </>;
 }

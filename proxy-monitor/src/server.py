@@ -89,6 +89,7 @@ checker: Optional[ProxyChecker] = None
 ws_clients: Set[WebSocket] = set()
 check_task: Optional[asyncio.Task] = None
 cleanup_task: Optional[asyncio.Task] = None
+check_schedule_changed = asyncio.Event()
 
 # token -> expiry (unix timestamp)
 sessions: Dict[str, float] = {}
@@ -206,19 +207,34 @@ async def _db_cleanup(force_vacuum: bool = False) -> None:
         raise RuntimeError("Storage not initialized")
 
 
+async def _wait_for_next_check(cycle_start: float) -> None:
+    """Keep the current cadence, but recalculate it when settings change."""
+    while True:
+        interval = max(0.1, float(config.get("monitoring", {}).get("check_interval_seconds", 60)))
+        remaining = cycle_start + interval - time.monotonic()
+        if remaining <= 0:
+            await asyncio.sleep(0.1)
+            return
+        try:
+            await asyncio.wait_for(check_schedule_changed.wait(), timeout=remaining)
+            check_schedule_changed.clear()
+        except asyncio.TimeoutError:
+            return
+
+
 async def _run_checks() -> None:
-    """Main check loop."""
+    """Main check loop. Config saves never start a second check cycle."""
     await asyncio.sleep(1)  # brief pause to let uvicorn settle
     while True:
         cycle_start = time.monotonic()
 
         mon = config.get("monitoring", {})
-        interval = mon.get("check_interval_seconds", 60)
         concurrent = mon.get("concurrent_checks", 10)
-        proxies: List[Dict] = config.get("proxies", [])
+        proxies: List[Dict] = list(config.get("proxies", []))
+        cycle_checker = checker
 
         if not proxies:
-            await asyncio.sleep(interval)
+            await _wait_for_next_check(cycle_start)
             continue
 
         sem = asyncio.Semaphore(concurrent)
@@ -227,7 +243,7 @@ async def _run_checks() -> None:
             async with sem:
                 pid = get_proxy_id(proxy)
                 try:
-                    results = await checker.check_proxy(proxy)  # type: ignore[union-attr]
+                    results = await cycle_checker.check_proxy(proxy)  # type: ignore[union-attr]
                     now = int(time.time())
                     for ct, res in results.items():
                         await storage.save_check(  # type: ignore[union-attr]
@@ -256,13 +272,7 @@ async def _run_checks() -> None:
         except Exception as exc:
             logger.error("Check loop error: %s", exc)
 
-        elapsed = time.monotonic() - cycle_start
-        sleep_time = max(0.1, interval - elapsed)
-
-        try:
-            await asyncio.sleep(sleep_time)
-        except asyncio.CancelledError:
-            return
+        await _wait_for_next_check(cycle_start)
 
 
 async def _run_cleanup() -> None:
@@ -548,7 +558,7 @@ async def api_save_config(
     request: Request,
     _: None = Depends(_require_auth),
 ) -> Dict:
-    global config, checker, check_task
+    global config, checker
 
     body: Dict = await request.json()
     save_config(body)
@@ -556,17 +566,10 @@ async def api_save_config(
     apply_logging_level()
     checker = ProxyChecker(config)
 
-    # Restart check loop with new settings
-    if check_task and not check_task.done():
-        check_task.cancel()
-        try:
-            await check_task
-        except (asyncio.CancelledError, Exception):
-            pass
-    check_task = asyncio.create_task(_run_checks())
+    check_schedule_changed.set()
     await _broadcast_stats()
 
-    return {"status": "ok", "message": "Config saved, monitoring restarted"}
+    return {"status": "ok", "message": "Config saved"}
 
 
 # ------------------------------------------------------------------ #
