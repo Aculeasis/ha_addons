@@ -1,5 +1,6 @@
 export type CheckType = 'tcp' | 'udp';
 export type GroupBy = 'minute' | 'hour' | 'day';
+export type Status = 'alive' | 'partial' | 'dead' | 'unknown' | 'stale' | 'disabled';
 
 export interface CheckCount {
   success: number;
@@ -42,15 +43,25 @@ export interface ProxyStatus {
   tcp_check: boolean;
   udp_check: boolean;
   is_alive: boolean;
+  status: Status;
+  checking: boolean;
+  last_checked: number | null;
+  fresh_until: number | null;
   external_ip: string | null;
   stats: ProxyStats;
 }
 
 export interface StatsData {
   proxies: ProxyStatus[];
-  summary: { total: number; alive: number; partial: number; dead: number };
-  last_updated: number;
-  meta: { window_minutes: number; check_interval: number; time_format: '12h' | '24h'; retention_days: number };
+  summary: { total: number } & Record<Status, number>;
+  last_updated: number | null;
+  generated_at: number;
+  monitor: {
+    state: 'starting' | 'checking' | 'waiting' | 'idle' | 'stalled' | 'stopped';
+    active_checks: number; completed_checks: number; total_checks: number;
+    last_cycle_started: number | null; last_cycle_finished: number | null; deadline_at: number | null;
+  };
+  meta: { window_minutes: number; check_interval: number; stale_after_seconds: number; time_format: '12h' | '24h'; retention_days: number };
 }
 
 export interface ChartPoint {

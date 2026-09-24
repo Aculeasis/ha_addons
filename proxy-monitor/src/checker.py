@@ -9,7 +9,6 @@ UDP check : issues a SOCKS5 UDP ASSOCIATE, then sends a DNS CH TXT whoami
             external IP is extracted as a bonus if Cloudflare responds.
 """
 import asyncio
-import logging
 import re
 import socket
 import time
@@ -20,13 +19,18 @@ import aiohttp
 import socks
 from aiohttp_socks import ProxyConnector
 
-logger = logging.getLogger(__name__)
+from monitoring import enabled_checks
 
 
 def _format_error(exc: Exception) -> str:
     """Format exception as error message, truncated to 250 chars."""
     msg = str(exc)
     return msg[:250] if msg else f"{type(exc).__name__}"
+
+
+def _failed(error: str) -> Dict[str, Any]:
+    # A failed check has no latency sample; storing the timeout distorts charts.
+    return {"success": False, "latency_ms": None, "external_ip": None, "error": error}
 
 
 class ProxyChecker:
@@ -36,9 +40,7 @@ class ProxyChecker:
         self._udp_test_addr: Optional[tuple] = None
         self._timeout: Optional[float] = None
 
-    # ------------------------------------------------------------------ #
-    #  Helpers (cached)                                                    #
-    # ------------------------------------------------------------------ #
+    # Helpers (cached)
     def _get_timeout(self) -> float:
         """Get timeout with caching to avoid repeated dict lookups."""
         if self._timeout is None:
@@ -91,8 +93,6 @@ class ProxyChecker:
         test_url = self._get_tcp_test_url()
         start = time.monotonic()
         try:
-            # Use ProxyConnector for SOCKS5 support
-            # Note: Each proxy needs its own connector due to different endpoints
             connector = ProxyConnector.from_url(self._proxy_url(proxy))
             async with aiohttp.ClientSession(
                 connector=connector,
@@ -105,10 +105,8 @@ class ProxyChecker:
                     ip = None
                     error = None
 
-                    # If we got a response, the proxy is alive.
-                    # We try to parse the IP, but if we can't, it's still a "success" (alive).
+                    # Any HTTP response confirms connectivity; IP extraction is optional.
                     try:
-                        # Try parsing as JSON first
                         try:
                             data = await resp.json(content_type=None)
                             if isinstance(data, dict):
@@ -121,14 +119,12 @@ class ProxyChecker:
                             elif isinstance(data, str):
                                 ip = data
                         except Exception:
-                            # Not valid JSON
                             pass
 
                         # If JSON parsing did not yield an IP, check plain text
                         if not ip:
                             text_raw = await resp.text()
                             text = text_raw.strip().strip('"\'')
-                            # Look for an IPv4 address pattern
                             ipv4_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', text)
                             if ipv4_match:
                                 ip = ipv4_match.group(0)
@@ -149,15 +145,7 @@ class ProxyChecker:
                     }
 
         except Exception as exc:
-            # This catch handles connection errors (proxy down, timeout, etc.)
-            # We do NOT record the elapsed time — it would just be the timeout
-            # value and is misleading. Store NULL instead so graphs show a gap.
-            return {
-                "success": False,
-                "latency_ms": None,
-                "external_ip": None,
-                "error": _format_error(exc),
-            }
+            return _failed(_format_error(exc))
 
     def _check_udp_sync(self, proxy: Dict) -> Dict[str, Any]:
         """Synchronous UDP check using socks library (run in executor)."""
@@ -192,7 +180,6 @@ class ProxyChecker:
             start_time = time.perf_counter()
             sock.sendto(dns_query, (test_ip, test_port))
             data, _ = sock.recvfrom(512)
-            # Only record latency on success — failed pings store NULL
             result["latency_ms"] = round((time.perf_counter() - start_time) * 1000, 2)
             result["success"] = True
 
@@ -214,52 +201,28 @@ class ProxyChecker:
     async def check_udp(self, proxy: Dict) -> Dict[str, Any]:
         """Check UDP connectivity through the SOCKS5 proxy via DNS query."""
         timeout = self._get_timeout()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
-            # asyncio.wait_for enforces a hard deadline at the event-loop level.
-            # Without it, run_in_executor has no cancellation: a blocked thread
-            # keeps occupying the ThreadPoolExecutor slot even after socket.timeout
-            # fires internally, starving the pool and causing queue buildup.
+            # Bound the coroutine's wait. Cancelling it does not stop the worker
+            # thread, which still relies on the socket timeout above.
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, self._check_udp_sync, proxy),
                 timeout=timeout + 2,  # +2s grace over the socket-level timeout
             )
         except asyncio.TimeoutError:
-            result = {
-                "success": False,
-                "latency_ms": None,
-                "external_ip": None,
-                "error": "Timeout",
-            }
+            result = _failed("Timeout")
         return result
 
-    # ------------------------------------------------------------------ #
-    #  Run all configured checks concurrently                             #
-    # ------------------------------------------------------------------ #
+    # Run all configured checks concurrently
     async def check_proxy(self, proxy: Dict) -> Dict[str, Dict]:
-        types: list[str] = []
-        coros = []
-
-        if proxy.get("tcp_check", True):
-            types.append("tcp")
-            coros.append(self.check_tcp(proxy))
-        if proxy.get("udp_check", False):
-            types.append("udp")
-            coros.append(self.check_udp(proxy))
-
-        if not coros:
-            return {}
-
+        types = enabled_checks(proxy)
+        checks = {"tcp": self.check_tcp, "udp": self.check_udp}
+        coros = [checks[kind](proxy) for kind in types]
         results_raw = await asyncio.gather(*coros, return_exceptions=True)
         results: Dict[str, Dict] = {}
         for ct, res in zip(types, results_raw):
             if isinstance(res, Exception):
-                results[ct] = {
-                    "success": False,
-                    "latency_ms": None,
-                    "external_ip": None,
-                    "error": _format_error(res),
-                }
+                results[ct] = _failed(_format_error(res))
             else:
                 results[ct] = res  # type: ignore[assignment]
         return results

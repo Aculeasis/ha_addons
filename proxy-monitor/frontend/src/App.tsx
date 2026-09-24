@@ -5,8 +5,8 @@ import { DetailModal } from './DetailModal';
 import { Modal } from './Modal';
 import { connectStats } from './realtime';
 import { SettingsModal } from './SettingsModal';
-import { proxyStatus } from './format';
-import type { StatsData } from './types';
+import { proxyStatus, statusLabels } from './format';
+import type { StatsData, Status } from './types';
 
 type Theme = 'system' | 'light' | 'dark';
 type Toast = { id: number; kind: 'success' | 'info' | 'error'; message: string };
@@ -53,7 +53,8 @@ export function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem('pm_token') ?? '');
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [safeguard, setSafeguard] = useState(false);
-  const [data, setData] = useState<StatsData | null>(null);
+  const [snapshot, setData] = useState<StatsData | null>(null);
+  const receivedAt = useRef(0);
   const [connected, setConnected] = useState(false);
   const [reconnectKey, setReconnectKey] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -114,13 +115,23 @@ export function App() {
 
   useEffect(() => {
     if (authRequired === null || (authRequired && !token)) return;
+    let active = true;
+    let newest = 0;
+    const receive = (stats: StatsData) => {
+      if (!active || stats.generated_at < newest) return;
+      newest = stats.generated_at;
+      receivedAt.current = Date.now();
+      setNow(receivedAt.current);
+      setData(stats);
+    };
     setConnected(false);
-    api.stats(token).then(setData).catch(handleError);
-    return connectStats(token, { onStats: setData, onConnection: setConnected, onUnauthorized: logout });
+    api.stats(token).then(receive).catch(error => { if (active) handleError(error); });
+    const disconnect = connectStats(token, { onStats: receive, onConnection: setConnected, onUnauthorized: logout });
+    return () => { active = false; disconnect(); };
   }, [authRequired, token, reconnectKey]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 15000);
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
   useEffect(() => { localStorage.setItem('pm_view', viewMode); }, [viewMode]);
@@ -178,12 +189,20 @@ export function App() {
     sessionStorage.setItem('pm_token', result.token);
     setToken(result.token);
   };
+  const serverNow = snapshot ? snapshot.generated_at + Math.max(0, now - receivedAt.current) / 1000 : now / 1000;
+  const stale = !!snapshot && now - receivedAt.current > 15000;
+  const monitorState = snapshot?.monitor.deadline_at != null && serverNow > snapshot.monitor.deadline_at
+    ? 'stalled' : snapshot?.monitor.state;
+  const monitorProblem = monitorState === 'stalled' || monitorState === 'stopped';
+  const data = snapshot ? { ...snapshot, proxies: snapshot.proxies.map(item => ({
+    ...item, status: proxyStatus(item, serverNow), checking: item.checking && connected && !stale && !monitorProblem,
+  })), summary: { total: snapshot.proxies.length, alive: 0, partial: 0, dead: 0, unknown: 0, stale: 0, disabled: 0 } } : null;
+  if (data) for (const item of data.proxies) data.summary[item.status] += 1;
   const proxy = data?.proxies.find(item => item.id === detailId);
   const summary = data?.summary;
-  const stale = !!data && now - data.last_updated * 1000 > Math.max(60000, data.meta.check_interval * 2000);
-  const lastUpdateTime = data ? new Date(data.last_updated * 1000).toLocaleTimeString(undefined,
+  const lastUpdateTime = data?.last_updated != null ? new Date(data.last_updated * 1000).toLocaleTimeString(undefined,
     { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: data.meta.time_format === '12h' }) : '—';
-  const names = (status: 'alive' | 'partial' | 'dead') => data?.proxies.filter(item => proxyStatus(item) === status).map(item => item.name).join('\n') ?? '';
+  const names = (status: Status) => data?.proxies.filter(item => item.status === status).map(item => item.name).join('\n') ?? '';
 
   return <>
     <header class="app-bar">
@@ -193,15 +212,15 @@ export function App() {
         {(['alive', 'partial', 'dead'] as const).map(status => <button key={status}
           class={`summary-pill ${status} ${statusFilter === status ? 'selected' : ''}`} title={privacy ? undefined : names(status)}
           aria-pressed={statusFilter === status} onClick={() => setStatusFilter(current => current === status ? 'all' : status)}>
-          <span class="summary-indicator" />{status.charAt(0).toUpperCase() + status.slice(1)}: <strong>{summary?.[status] ?? '—'}</strong>
+          <span class="summary-indicator" />{statusLabels[status]}: <strong>{summary?.[status] ?? '—'}</strong>
         </button>)}
       </div>
       <label class="header-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
         <input type="search" aria-label="Search proxies" placeholder="Search" value={query} onInput={event => setQuery(event.currentTarget.value)} />
       </label>
       <div class="app-actions">
-        <span class="updated-at" aria-label={data ? `Last update ${lastUpdateTime}` : 'Waiting for update'}>{lastUpdateTime}</span>
-        <span class={`connection-dot ${connected && !stale ? 'connected' : ''}`} title={connected ? stale ? 'Data is stale' : 'Live connection active' : 'Reconnecting'} />
+        <span class="updated-at" aria-label={`Last check ${lastUpdateTime}`} title="Last completed check">{lastUpdateTime}</span>
+        <span class={`connection-dot ${connected && !stale ? 'connected' : ''}`} title={connected ? stale ? 'Updates interrupted' : 'Live connection active' : 'Reconnecting'} />
         <div class="theme-control" ref={themeControl}>
           <button class="icon-button toolbar-icon" title={`Theme: ${theme}`} aria-label="Theme" aria-expanded={themeMenu} onClick={() => setThemeMenu(!themeMenu)}><ThemeIcon theme={theme} /></button>
           {themeMenu && <div class="theme-menu">
@@ -213,11 +232,13 @@ export function App() {
       </div>
     </header>
     {data && (!connected || stale || savingOrder) && <div class={`connection-banner ${savingOrder && connected && !stale ? 'saving' : ''}`} role="status">
-      <span>{savingOrder && connected && !stale ? 'Saving proxy order…' : `${connected ? 'Data is stale' : 'Connection lost'} · Last update ${new Date(data.last_updated * 1000).toLocaleTimeString()}`}</span>
+      <span>{savingOrder && connected && !stale ? 'Saving proxy order…' : `${connected ? 'Updates interrupted' : 'Connection lost'} · Last check ${lastUpdateTime}`}</span>
       {(!connected || stale) && <button class="btn btn-ghost btn-sm" onClick={() => setReconnectKey(value => value + 1)}>Retry now</button>}
     </div>}
-    <main class="page-content"><Dashboard data={data} orderedIds={orderedIds} query={query} statusFilter={statusFilter} privacy={privacy} viewMode={viewMode} onOpen={setDetailId} onReorder={reorder} /></main>
-    {proxy && data && <DetailModal key={proxy.id} proxy={proxy} meta={data.meta} token={token} theme={resolvedTheme} onClose={() => setDetailId(null)} onError={handleError} />}
+    <main class="page-content">
+      <Dashboard data={data} orderedIds={orderedIds} query={query} statusFilter={statusFilter} privacy={privacy} viewMode={viewMode} onOpen={setDetailId} onReorder={reorder} />
+    </main>
+    {proxy && data && <DetailModal key={proxy.id} proxy={proxy} meta={data.meta} now={serverNow} token={token} theme={resolvedTheme} onClose={() => setDetailId(null)} onError={handleError} />}
     {settingsOpen && <SettingsModal token={token} safeguard={safeguard} viewMode={viewMode} onViewChange={setViewMode}
       onClose={() => setSettingsOpen(false)} onSaved={() => { setSettingsOpen(false); setOrderedIds(null); }} onError={handleError} notify={notify} />}
     {authRequired && !token && <Login onLogin={login} />}

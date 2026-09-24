@@ -3,7 +3,7 @@ import { Chart, type ChartConfigurationCustomTypesPerDataset } from 'chart.js/au
 import 'chartjs-adapter-date-fns';
 import { api } from './api';
 import { DateRangePicker } from './DateRangePicker';
-import { latency, latencyLevel, rate } from './format';
+import { checkDateTime, latency, latencyLevel, rate } from './format';
 import { Modal } from './Modal';
 import type { ChartPoint, CheckType, GroupBy, ProxyStatus, StatsData } from './types';
 
@@ -73,8 +73,8 @@ function LatencyChart({ series, groupBy, timeFormat, theme, onHour }: {
   return <canvas ref={canvas} role="img" aria-label="Checks and average latency over time; values are available in the data table below" />;
 }
 
-export function DetailModal({ proxy, meta, token, theme, onClose, onError }: {
-  proxy: ProxyStatus; meta: StatsData['meta']; token: string; theme: string; onClose: () => void; onError: (error: unknown) => void;
+export function DetailModal({ proxy, meta, now, token, theme, onClose, onError }: {
+  proxy: ProxyStatus; meta: StatsData['meta']; now: number; token: string; theme: string; onClose: () => void; onError: (error: unknown) => void;
 }) {
   const [type, setType] = useState<CheckType>(proxy.tcp_check ? 'tcp' : 'udp');
   const [hours, setHours] = useState(24);
@@ -89,32 +89,35 @@ export function DetailModal({ proxy, meta, token, theme, onClose, onError }: {
   const otherType: CheckType = type === 'tcp' ? 'udp' : 'tcp';
   const otherEnabled = otherType === 'tcp' ? proxy.tcp_check : proxy.udp_check;
   const otherTotal = proxy.stats.total?.[otherType];
-  const checkStatus = last ? (last.success ? '● Online' : '● Offline') : '● No data';
-  const checkStatusClass = last ? (last.success ? 'success' : 'danger') : 'muted';
-  const recentError = last?.error && last.error_timestamp && last.error_timestamp >= Date.now() / 1000 - meta.window_minutes * 60 ? last.error : null;
+  const stale = last?.timestamp != null && now - last.timestamp > meta.stale_after_seconds;
+  const checkStatus = last?.timestamp == null ? '● Not checked' : stale ? '● Stale' : last.success ? '● Online' : '● Offline';
+  const checkStatusClass = last?.timestamp == null ? 'muted' : stale ? 'warning' : last.success ? 'success' : 'danger';
+  const recentError = last?.error && last.error_timestamp && last.error_timestamp >= now - meta.window_minutes * 60 ? last.error : null;
+  const liveCheck = fromTs === undefined ? last?.timestamp : undefined;
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setSeries([]);
     api.chart(token, proxy.id, groupBy, hours, fromTs, toTs).then(data => {
       if (active) setSeries(data[type] ?? []);
     }).catch(error => { if (active) onError(error); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [token, proxy.id, type, groupBy, hours, fromTs, toTs]);
+  }, [token, proxy.id, type, groupBy, hours, fromTs, toTs, liveCheck]);
 
   const setRange = (from?: number, to?: number) => { setFromTs(from); setToTs(to); };
   const drillDown = useCallback((ts: number) => {
     setFromTs(ts); setToTs(ts + 3600); setGroupBy('minute');
   }, []);
   return <Modal title={proxy.name} privateTitle onClose={onClose} size="large">
-    <div class="detail-info-grid">
-      <Info label={`${type.toUpperCase()} status`} value={checkStatus} className={checkStatusClass} />
+    <div class={`detail-info-grid ${otherEnabled ? '' : 'single-protocol'}`}>
+      <Info label={`${type.toUpperCase()} status${proxy.checking ? ' · Checking…' : ''}`} value={checkStatus} className={checkStatusClass} />
+      <Info label="Last check" value={checkDateTime(last?.timestamp, meta.time_format)} />
       <Info label="Address" value={`${proxy.host}:${proxy.port}`} className="privacy mono" />
       <Info label="External IP" value={proxy.external_ip ?? '—'} className="privacy" />
       <Info label="Latency" value={latency(last?.latency_ms)} className={latencyLevel(last?.latency_ms)} />
       <Info label={`${type.toUpperCase()} checks`} value={total ? `${total.success}/${total.total} (${rate(total)}%)` : '—'} />
-      {otherEnabled && <Info label={`${otherType.toUpperCase()} checks`} value={otherTotal ? `${otherTotal.success}/${otherTotal.total} (${rate(otherTotal)}%)` : '—'} blockClass="secondary-left" />}
-      <Info label="Check types" value={[proxy.tcp_check && 'TCP', proxy.udp_check && 'UDP'].filter(Boolean).join(' + ') || 'None'} blockClass={otherEnabled ? 'secondary-right' : 'secondary-full'} />
+      {otherEnabled && <Info label={`${otherType.toUpperCase()} checks`} value={otherTotal ? `${otherTotal.success}/${otherTotal.total} (${rate(otherTotal)}%)` : '—'} />}
       {recentError && <Info label="Last error" value={recentError} className="danger" blockClass="secondary-full" />}
     </div>
     <div class="chart-controls">
@@ -144,7 +147,7 @@ export function DetailModal({ proxy, meta, token, theme, onClose, onError }: {
       <caption>{type.toUpperCase()} history by {groupBy}</caption>
       <thead><tr><th scope="col">Time</th><th scope="col">Success</th><th scope="col">Failures</th><th scope="col">Avg latency</th><th scope="col">Min</th><th scope="col">Max</th></tr></thead>
       <tbody>{series.map(point => <tr key={point.ts}>
-        <th scope="row">{new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short', hour12: meta.time_format === '12h' }).format(point.ts * 1000)}</th>
+        <th scope="row">{checkDateTime(point.ts, meta.time_format)}</th>
         <td>{point.successes}</td><td>{point.failures}</td><td>{latency(point.avg_latency)}</td><td>{latency(point.min_latency)}</td><td>{latency(point.max_latency)}</td>
       </tr>)}</tbody>
     </table>{!loading && !series.length && <p class="muted">No history for this range.</p>}</div>}

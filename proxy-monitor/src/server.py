@@ -17,6 +17,7 @@ import ipaddress
 import json
 import logging
 import os
+import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -37,11 +38,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from checker import ProxyChecker
+from configuration import validate_config
+from monitoring import CheckProgress, STATUSES, enabled_checks, proxy_health, stale_after
 from storage import Storage
 
-# ------------------------------------------------------------------ #
-#  Logging                                                             #
-# ------------------------------------------------------------------ #
+# Logging
 LOG_LEVELS = {
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
@@ -68,9 +69,7 @@ def apply_logging_level() -> None:
     logger.info("Logging level set to %s", level_name)
 
 
-# ------------------------------------------------------------------ #
-#  Global state & Args                                                 #
-# ------------------------------------------------------------------ #
+# Global state & Args
 
 def _parse_args():
     parser = argparse.ArgumentParser(description="SOCKS Proxy Monitor Server")
@@ -89,7 +88,11 @@ checker: Optional[ProxyChecker] = None
 ws_clients: Set[WebSocket] = set()
 check_task: Optional[asyncio.Task] = None
 cleanup_task: Optional[asyncio.Task] = None
+stats_task: Optional[asyncio.Task] = None
 check_schedule_changed = asyncio.Event()
+stats_changed = asyncio.Event()
+broadcast_lock = asyncio.Lock()
+check_progress = CheckProgress()
 
 # token -> expiry (unix timestamp)
 sessions: Dict[str, float] = {}
@@ -97,27 +100,34 @@ SESSION_TTL = 86400  # 24 h
 
 WEB_DIR = Path(__file__).parent / "web"
 
-# ------------------------------------------------------------------ #
-#  Config helpers                                                      #
-# ------------------------------------------------------------------ #
+# Config helpers
 
 def load_config() -> Dict[str, Any]:
     with open(CONFIG_PATH, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        cfg = yaml.safe_load(fh)
+    validate_config(cfg)
+    return cfg
 
 
 def save_config(cfg: Dict[str, Any]) -> None:
-    with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
-        yaml.dump(cfg, fh, default_flow_style=False, allow_unicode=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=CONFIG_PATH.parent, delete=False) as fh:
+            temporary = Path(fh.name)
+            yaml.safe_dump(cfg, fh, default_flow_style=False, allow_unicode=True)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temporary, CONFIG_PATH)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def get_proxy_id(proxy: Dict) -> str:
     return f"{proxy['host']}:{proxy['port']}"
 
 
-# ------------------------------------------------------------------ #
-#  Auth helpers                                                        #
-# ------------------------------------------------------------------ #
+# Auth helpers
 
 def _auth_required() -> bool:
     return bool(config.get("server", {}).get("password", ""))
@@ -187,9 +197,7 @@ async def _require_auth(request: Request) -> None:
     )
 
 
-# ------------------------------------------------------------------ #
-#  Check / cleanup                                                   #
-# ------------------------------------------------------------------ #
+# Check / cleanup
 
 async def _db_cleanup(force_vacuum: bool = False) -> None:
     if storage:
@@ -230,7 +238,7 @@ async def _run_checks() -> None:
 
         mon = config.get("monitoring", {})
         concurrent = mon.get("concurrent_checks", 10)
-        proxies: List[Dict] = list(config.get("proxies", []))
+        proxies = [proxy for proxy in config.get("proxies", []) if enabled_checks(proxy)]
         cycle_checker = checker
 
         if not proxies:
@@ -238,10 +246,14 @@ async def _run_checks() -> None:
             continue
 
         sem = asyncio.Semaphore(concurrent)
+        check_progress.begin(mon, len(proxies))
+        stats_changed.set()
 
         async def _check_one(proxy: Dict) -> None:
             async with sem:
                 pid = get_proxy_id(proxy)
+                check_progress.active.add(pid)
+                stats_changed.set()
                 try:
                     results = await cycle_checker.check_proxy(proxy)  # type: ignore[union-attr]
                     now = int(time.time())
@@ -262,15 +274,21 @@ async def _run_checks() -> None:
                     )
                 except Exception as err:
                     logger.error("Unhandled error checking %s: %s", proxy.get("name", pid), err)
+                finally:
+                    check_progress.active.discard(pid)
+                    check_progress.completed += 1
+                    stats_changed.set()
 
         try:
             await asyncio.gather(*[_check_one(p) for p in proxies], return_exceptions=True)
             await storage.commit()  # type: ignore[union-attr]
-            await _broadcast_stats()
         except asyncio.CancelledError:
-            return
+            raise
         except Exception as exc:
             logger.error("Check loop error: %s", exc)
+        finally:
+            check_progress.finish()
+            stats_changed.set()
 
         await _wait_for_next_check(cycle_start)
 
@@ -288,22 +306,20 @@ async def _run_cleanup() -> None:
             logger.error("Cleanup error: %s", exc)
 
 
-
-
-# ------------------------------------------------------------------ #
-#  Stats aggregation                                                  #
-# ------------------------------------------------------------------ #
+# Stats aggregation
 
 async def _all_stats() -> Dict[str, Any]:
     proxies: List[Dict] = config.get("proxies", [])
     mon = config.get("monitoring", {})
     window = mon.get("recent_window_minutes", 5)
     interval = mon.get("check_interval_seconds", 60)
-    sparkline_since = int(time.time()) - 60 * interval
+    now = time.time()
+    sparkline_since = int(now) - max(60 * interval, window * 60)
+    enabled_count = sum(bool(enabled_checks(proxy)) for proxy in proxies)
+    max_age = stale_after(mon, enabled_count)
     proxy_list: List[Dict] = []
-    alive_count = 0
-    partial_count = 0
-    dead_count = 0
+    counts = dict.fromkeys(STATUSES, 0)
+    latest_check = None
 
     all_summaries = await storage.get_all_summaries(window, sparkline_since=sparkline_since)  # type: ignore[union-attr]
 
@@ -312,50 +328,14 @@ async def _all_stats() -> Dict[str, Any]:
         summary = all_summaries.get(pid, {})
 
         last_checks: Dict = summary.get("last_checks", {})
-        is_alive = False
-        all_clean = True
-
-        # Check if any protocol is enabled
-        has_tcp = proxy.get("tcp_check", True)
-        has_udp = proxy.get("udp_check", False)
-        any_enabled = has_tcp or has_udp
-
-        # Collect external IPs from each check type
-        tcp_ip: Optional[str] = None
-        udp_ip: Optional[str] = None
-
-        for ct in ["tcp", "udp"]:
-            # Check if this protocol is enabled for this proxy
-            # Default: TCP is enabled if not specified; UDP is disabled if not specified
-            enabled = proxy.get(f"{ct}_check", ct == "tcp")
-            if enabled:
-                lc = last_checks.get(ct, {})
-                if lc.get("success"):
-                    is_alive = True
-                else:
-                    all_clean = False
-
-                # Store IP per protocol for fallback logic
-                if lc.get("external_ip"):
-                    if ct == "tcp":
-                        tcp_ip = lc["external_ip"]
-                    else:
-                        udp_ip = lc["external_ip"]
-
-        # Fallback: use TCP IP if available, otherwise use UDP IP
-        # This handles cases where TCP is disabled or TCP check failed to get IP
-        external_ip = tcp_ip or udp_ip
-
-        # Only count as alive/partial/dead if at least one protocol is enabled
-        # Disabled proxies (no protocols enabled) are not counted in summary
-        if any_enabled:
-            if is_alive:
-                if all_clean:
-                    alive_count += 1
-                else:
-                    partial_count += 1
-            else:
-                dead_count += 1
+        status = proxy_health(proxy, last_checks, now, max_age)
+        counts[status] += 1
+        checks = [last_checks.get(kind, {}) for kind in enabled_checks(proxy)]
+        timestamps = [check["timestamp"] for check in checks if check.get("timestamp") is not None]
+        last_checked = max(timestamps, default=None)
+        if last_checked is not None:
+            latest_check = max(latest_check or 0, last_checked)
+        external_ip = next((check["external_ip"] for check in checks if check.get("external_ip")), None)
 
         proxy_list.append(
             {
@@ -366,7 +346,11 @@ async def _all_stats() -> Dict[str, Any]:
                 "tags": proxy.get("tags", []),
                 "tcp_check": proxy.get("tcp_check", True),
                 "udp_check": proxy.get("udp_check", False),
-                "is_alive": is_alive,
+                "is_alive": status in ("alive", "partial"),
+                "status": status,
+                "checking": pid in check_progress.active,
+                "last_checked": last_checked,
+                "fresh_until": min(timestamps) + max_age if timestamps and len(timestamps) == len(checks) else None,
                 "external_ip": external_ip,
                 "stats": summary,
             }
@@ -374,16 +358,14 @@ async def _all_stats() -> Dict[str, Any]:
 
     return {
         "proxies": proxy_list,
-        "summary": {
-            "total": len(proxies),
-            "alive": alive_count,
-            "partial": partial_count,
-            "dead": dead_count,
-        },
-        "last_updated": int(time.time()),
+        "summary": {"total": len(proxies), **counts},
+        "last_updated": latest_check,
+        "generated_at": now,
+        "monitor": check_progress.snapshot(check_task is not None and not check_task.done(), mon, enabled_count),
         "meta": {
             "window_minutes": window,
             "check_interval": config.get("monitoring", {}).get("check_interval_seconds", 60),
+            "stale_after_seconds": max_age,
             "time_format": config.get("server", {}).get("time_format", "24h"),
             "retention_days": config.get("storage", {}).get("retention_days", 30),
         },
@@ -391,27 +373,42 @@ async def _all_stats() -> Dict[str, Any]:
 
 
 async def _broadcast_stats() -> None:
-    if not ws_clients:
-        return
-    data = await _all_stats()
-    msg = json.dumps({"type": "stats", "data": data})
-    dead: List[WebSocket] = []
-    for ws in ws_clients:
+    async with broadcast_lock:
+        if not ws_clients:
+            return
+        data = await _all_stats()
+        msg = json.dumps({"type": "stats", "data": data})
+
+        async def send(ws: WebSocket) -> None:
+            try:
+                await asyncio.wait_for(ws.send_text(msg), timeout=5)
+            except Exception:
+                ws_clients.discard(ws)
+
+        # Connections can close while send_text yields to the event loop.
+        await asyncio.gather(*(send(ws) for ws in tuple(ws_clients)))
+
+
+async def _run_stats() -> None:
+    """Publish activity and ageing even when the checker has stopped progressing."""
+    while True:
         try:
-            await ws.send_text(msg)
+            await asyncio.wait_for(stats_changed.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+        stats_changed.clear()
+        try:
+            await _broadcast_stats()
         except Exception:
-            dead.append(ws)
-    for ws in dead:
-        ws_clients.discard(ws)
+            logger.exception("Stats broadcast failed")
+        await asyncio.sleep(0.1)
 
 
-# ------------------------------------------------------------------ #
-#  Lifespan                                                            #
-# ------------------------------------------------------------------ #
+# Lifespan
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global config, storage, checker, check_task, cleanup_task
+    global config, storage, checker, check_task, cleanup_task, stats_task, check_progress
 
     config = load_config()
     apply_logging_level()
@@ -419,9 +416,11 @@ async def lifespan(app: FastAPI):
     storage = Storage(db_path)
     await storage.init()
     checker = ProxyChecker(config)
+    check_progress = CheckProgress()
 
     check_task = asyncio.create_task(_run_checks())
     cleanup_task = asyncio.create_task(_run_cleanup())
+    stats_task = asyncio.create_task(_run_stats())
 
     n = len(config.get("proxies", []))
     logger.warning("Proxy Monitor started - %d prox%s configured.", n, "ies" if n != 1 else "y")
@@ -429,7 +428,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Graceful shutdown
-    for task in (check_task, cleanup_task):
+    for task in (check_task, cleanup_task, stats_task):
         if task and not task.done():
             task.cancel()
             try:
@@ -442,9 +441,7 @@ async def lifespan(app: FastAPI):
         await storage.close()
 
 
-# ------------------------------------------------------------------ #
-#  App                                                                 #
-# ------------------------------------------------------------------ #
+# App
 
 app = FastAPI(title="Proxy Monitor", lifespan=lifespan)
 
@@ -456,9 +453,7 @@ async def whitelist_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# ------------------------------------------------------------------ #
-#  Auth endpoints                                                      #
-# ------------------------------------------------------------------ #
+# Auth endpoints
 
 class LoginBody(BaseModel):
     username: str
@@ -500,9 +495,7 @@ async def login(body: LoginBody, request: Request) -> Dict:
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
-# ------------------------------------------------------------------ #
-#  Data API                                                            #
-# ------------------------------------------------------------------ #
+# Data API
 
 @app.get("/api/stats")
 async def api_stats(_: None = Depends(_require_auth)) -> Dict:
@@ -521,9 +514,7 @@ async def api_chart(
     return await storage.get_chart_data(proxy_id, hours=hours, group_by=group_by, from_ts=from_ts, to_ts=to_ts)
 
 
-# ------------------------------------------------------------------ #
-#  Config API                                                          #
-# ------------------------------------------------------------------ #
+# Config API
 
 @app.get("/api/config")
 async def api_get_config(_: None = Depends(_require_auth)) -> Dict:
@@ -560,7 +551,11 @@ async def api_save_config(
 ) -> Dict:
     global config, checker
 
-    body: Dict = await request.json()
+    try:
+        body = await request.json()
+        validate_config(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     save_config(body)
     config = body
     apply_logging_level()
@@ -572,9 +567,7 @@ async def api_save_config(
     return {"status": "ok", "message": "Config saved"}
 
 
-# ------------------------------------------------------------------ #
-#  WebSocket                                                           #
-# ------------------------------------------------------------------ #
+# WebSocket
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -599,7 +592,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         if needs_auth and not _validate_session(token):
             await websocket.close(code=4401, reason="Unauthorized")
             return
-    except (asyncio.TimeoutError, Exception) as exc:
+    except Exception:
         await websocket.close(code=4401, reason="Unauthorized")
         return
 
@@ -625,9 +618,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         ws_clients.discard(websocket)
 
 
-# ------------------------------------------------------------------ #
-#  Static files (SPA)                                                  #
-# ------------------------------------------------------------------ #
+# Static files (SPA)
 
 @app.get("/")
 async def serve_root() -> FileResponse:
@@ -651,10 +642,7 @@ async def serve_static(path: str) -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
-
-# ------------------------------------------------------------------ #
-#  Entry point                                                         #
-# ------------------------------------------------------------------ #
+# Entry point
 
 def _main():
     _cfg = load_config()

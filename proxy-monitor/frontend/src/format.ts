@@ -1,14 +1,21 @@
-import type { CheckCount, ProxyStatus, SparkPoint } from './types';
+import type { CheckCount, ProxyStatus, SparkPoint, Status } from './types';
 
-export type Status = 'alive' | 'partial' | 'dead' | 'disabled';
+export const statusLabels: Record<Status, string> = {
+  alive: 'Alive', partial: 'Partial', dead: 'Dead', unknown: 'Not checked', stale: 'Stale', disabled: 'Disabled',
+};
 
-export function proxyStatus(proxy: ProxyStatus): Status {
-  if (!proxy.tcp_check && !proxy.udp_check) return 'disabled';
-  const checks = proxy.stats.last_checks ?? {};
-  const tcpOk = !proxy.tcp_check || !!checks.tcp?.success;
-  const udpOk = !proxy.udp_check || !!checks.udp?.success;
-  if (proxy.is_alive && tcpOk && udpOk) return 'alive';
-  return proxy.is_alive ? 'partial' : 'dead';
+export function proxyStatus(proxy: ProxyStatus, now: number): Status {
+  if (proxy.fresh_until !== null && now > proxy.fresh_until && proxy.status !== 'disabled') return 'stale';
+  return proxy.status;
+}
+
+export function checkDateTime(timestamp: number | null | undefined, timeFormat: '12h' | '24h'): string {
+  if (timestamp == null) return 'Never';
+  const date = new Date(timestamp * 1000);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const day = `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${pad(date.getFullYear() % 100)}`;
+  const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: timeFormat === '12h' }).format(date);
+  return `${day}, ${time}`;
 }
 
 export function rate(stats?: CheckCount): number {
@@ -32,7 +39,7 @@ export function sparkline(points?: SparkPoint[], recent?: CheckCount): string | 
       visible.reduce((sum, point) => sum + point.fail, 0) !== recent.fail) return undefined;
   return visible.map((point, index) => {
     const total = point.success + point.fail;
-    const x = 2 + index * 296 / (visible.length - 1);
+    const x = index * 300 / (visible.length - 1);
     const y = 37 - (total ? point.success / total : 0) * 34;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');

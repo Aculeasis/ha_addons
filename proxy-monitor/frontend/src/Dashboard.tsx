@@ -1,6 +1,6 @@
 import { useRef, useState } from 'preact/hooks';
-import type { CheckCount, CheckType, ProxyStatus, StatsData } from './types';
-import { latency, latencyLevel, proxyStatus, rate, sparkline } from './format';
+import type { CheckCount, CheckType, ProxyStatus, StatsData, Status } from './types';
+import { checkDateTime, latency, latencyLevel, rate, sparkline, statusLabels } from './format';
 
 function CheckRow({ type, total, recent }: {
   type: CheckType; total?: CheckCount; recent?: CheckCount;
@@ -39,7 +39,7 @@ function Sparkline({ proxy }: { proxy: ProxyStatus }) {
   const gradientId = `spark-${proxy.id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
   return <div class="sparkline-wrap"><svg viewBox="0 0 300 40" preserveAspectRatio="none" role="img" aria-label="Recent success history">
     <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--chart)" stop-opacity=".45" /><stop offset="1" stop-color="var(--chart)" stop-opacity="0" /></linearGradient></defs>
-    {tcp && <><polygon points={`${tcp} 298,40 2,40`} fill={`url(#${gradientId})`} /><polyline points={tcp} fill="none" stroke="var(--chart)" stroke-width="1.6" /></>}
+    {tcp && <><polygon points={`${tcp} 300,40 0,40`} fill={`url(#${gradientId})`} /><polyline points={tcp} fill="none" stroke="var(--chart)" stroke-width="1.6" /></>}
     {udp && <polyline points={udp} fill="none" stroke="var(--chart2)" stroke-width="1.2" />}
   </svg></div>;
 }
@@ -51,7 +51,7 @@ function ProxyCard({ proxy, privacy, onOpen, onPointerDown, onPointerMove, onPoi
   onPointerUp: (event: PointerEvent) => void; onPointerCancel: () => void;
   dropTarget: boolean; dragging: boolean; offset: { x: number; y: number };
 }) {
-  const status = proxyStatus(proxy);
+  const status = proxy.status;
   const canOpen = proxy.tcp_check || proxy.udp_check;
   const tags = proxy.tags ?? [];
   const visibleTags = tags.length > 2 ? tags.slice(0, 1) : tags;
@@ -63,7 +63,7 @@ function ProxyCard({ proxy, privacy, onOpen, onPointerDown, onPointerMove, onPoi
     onClick={canOpen ? onOpen : undefined}
     onKeyDown={canOpen ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(); } } : undefined}>
     <div class="card-heading">
-      <span class={`status-dot ${status}`} aria-label={status} />
+      <span class={`status-dot ${status}`} aria-label={statusLabels[status]} title={statusLabels[status]} />
       <div class="card-identity">
         <div class="card-name privacy">{proxy.name}</div>
         <div class="card-address privacy">{proxy.host}:{proxy.port}</div>
@@ -96,7 +96,7 @@ function ProxyCard({ proxy, privacy, onOpen, onPointerDown, onPointerMove, onPoi
 }
 
 export function Dashboard({ data, orderedIds, query, statusFilter, privacy, viewMode, onOpen, onReorder }: {
-  data: StatsData | null; orderedIds: string[] | null; query: string; statusFilter: 'all' | 'alive' | 'partial' | 'dead'; privacy: boolean; viewMode: 'cards' | 'table';
+  data: StatsData | null; orderedIds: string[] | null; query: string; statusFilter: 'all' | Status; privacy: boolean; viewMode: 'cards' | 'table';
   onOpen: (id: string) => void; onReorder: (ids: string[]) => void;
 }) {
   const dragId = useRef<string | null>(null);
@@ -111,7 +111,7 @@ export function Dashboard({ data, orderedIds, query, statusFilter, privacy, view
   const rank = new Map(orderedIds?.map((id, index) => [id, index]));
   const ordered = [...data.proxies].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
   const needle = query.trim().toLocaleLowerCase();
-  const visible = ordered.filter(proxy => (statusFilter === 'all' || proxyStatus(proxy) === statusFilter) &&
+  const visible = ordered.filter(proxy => (statusFilter === 'all' || proxy.status === statusFilter) &&
     (!needle || [proxy.name, proxy.host, proxy.external_ip ?? '', ...(proxy.tags ?? [])]
       .some(value => value.toLocaleLowerCase().includes(needle))));
   if (!visible.length) return <div class="empty-state"><h2>No matching proxies</h2><p>Try another search term.</p></div>;
@@ -196,13 +196,14 @@ export function Dashboard({ data, orderedIds, query, statusFilter, privacy, view
     dragId.current = null;
   };
   if (viewMode === 'table') return <div class="proxy-table-wrap"><table class="proxy-table">
-    <thead><tr><th>Proxy</th><th>Status</th><th>Address</th><th>TCP</th><th>UDP</th><th>Tags</th></tr></thead>
+    <thead><tr><th>Proxy</th><th>Status</th><th>Last check</th><th>Address</th><th>TCP</th><th>UDP</th><th>Tags</th></tr></thead>
     <tbody>{visible.map(proxy => <tr key={proxy.id} data-proxy-id={proxy.id} draggable={!needle}
       class={`${overId === proxy.id ? 'drag-over' : ''} ${draggingId === proxy.id ? 'dragging' : ''}`}
       onDragStart={event => startDrag(proxy, event)} onDragEnd={endDrag}
       onDragOver={event => dragOver(proxy.id, event)} onDrop={event => drop(proxy.id, event)}>
       <td><button class="table-proxy-name privacy" onClick={() => onOpen(proxy.id)}>{proxy.name}</button></td>
-      <td><span class={`status-dot ${proxyStatus(proxy)}`} /> {proxyStatus(proxy)}</td>
+      <td><span class={`status-dot ${proxy.status}`} /> {statusLabels[proxy.status]} {proxy.checking && <span class="checking-badge">Checking…</span>}</td>
+      <td>{checkDateTime(proxy.last_checked, data.meta.time_format)}</td>
       <td class="privacy mono">{proxy.host}:{proxy.port}</td>
       {(['tcp', 'udp'] as const).map(type => <td key={type}>{proxy[`${type}_check`] ?
         <>{latency(proxy.stats.window?.[type]?.lat_avg ?? proxy.stats.last_checks?.[type]?.latency_ms)} · {rate(proxy.stats.window?.[type])}%</> : '—'}</td>)}

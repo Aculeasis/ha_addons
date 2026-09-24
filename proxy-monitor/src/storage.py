@@ -24,9 +24,7 @@ class Storage:
         self._db: Optional[aiosqlite.Connection] = None
         self._write_lock = asyncio.Lock()
 
-    # ------------------------------------------------------------------ #
-    #  Init / Close                                                        #
-    # ------------------------------------------------------------------ #
+    # Init / Close
     async def _get_schema_version(self) -> int:
         """Get current schema version from database. Returns 0 if version table doesn't exist."""
         cur = await self._db.execute(
@@ -177,9 +175,7 @@ class Storage:
             return row[0]
         return 0
 
-    # ------------------------------------------------------------------ #
-    #  Write                                                               #
-    # ------------------------------------------------------------------ #
+    # Write
     async def save_check(
         self,
         proxy_id: str,
@@ -234,9 +230,7 @@ class Storage:
                  external_ip, error, error_ts, success_int),
             )
 
-    # ------------------------------------------------------------------ #
-    #  Read – summary (used by WebSocket broadcast)                       #
-    # ------------------------------------------------------------------ #
+    # Read – summary (used by WebSocket broadcast)
     async def get_all_summaries(
         self, window_minutes: int = 5, sparkline_since: int = 0
     ) -> Dict[str, Dict[str, Any]]:
@@ -337,9 +331,7 @@ class Storage:
 
         return {"total": total_stats, "window": window_stats, "last_checks": last_checks, "sparkline": sparkline}
 
-    # ------------------------------------------------------------------ #
-    #  Read – chart data (detail modal)                                    #
-    # ------------------------------------------------------------------ #
+    # Read – chart data (detail modal)
     async def get_chart_data(
         self,
         proxy_id: str,
@@ -356,7 +348,9 @@ class Storage:
         to_ts = to_ts if to_ts is not None else now
         interval = {"minute": 60, "hour": 3600, "day": 86400}.get(group_by, 3600)
 
-        proxy_fk = await self._get_proxy_fk(proxy_id)
+        proxy_fk = self._proxy_cache.get(proxy_id)
+        if proxy_fk is None:
+            return {}
         async with self._db.execute(
             """
             SELECT check_type,
@@ -390,9 +384,7 @@ class Storage:
             )
         return result
 
-    # ------------------------------------------------------------------ #
-    #  Cleanup                                                             #
-    # ------------------------------------------------------------------ #
+    # Cleanup
     async def _recalculate_counters(self) -> None:
         """Recalculate total_success and total_count in proxy_state based on proxy_checks."""
         await self._db.execute("""
@@ -468,5 +460,8 @@ class Storage:
     async def vacuum(self) -> None:
         if not self._db:
             raise RuntimeError("Database not initialized")
-        await self._db.execute("VACUUM")
+        async with self._write_lock:
+            # Checks are batched; VACUUM cannot run inside their open transaction.
+            await self._db.commit()
+            await self._db.execute("VACUUM")
         logger.warning("Database optimized (VACUUM)")
