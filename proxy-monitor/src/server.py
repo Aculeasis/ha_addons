@@ -634,7 +634,7 @@ async def serve_static(path: str) -> FileResponse:
         fp = (root / path.lstrip("/\\")).resolve()
 
         # Check if the file is within WEB_DIR and exists
-        if fp.is_file() and fp.is_relative_to(root):
+        if fp.is_relative_to(root) and fp.is_file():
             return FileResponse(fp)
     except Exception:
         pass
