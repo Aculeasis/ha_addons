@@ -14,10 +14,225 @@ const weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
 function startOfDay(date: Date) { return new Date(date.getFullYear(), date.getMonth(), date.getDate()); }
 function sameDay(a: Date, b: Date) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
-function timeValue(date?: Date) { return date ? `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` : ''; }
-function rangeLabel(start: Date, end: Date) {
-  const format = (date: Date) => `${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)}, ${timeValue(date)}`;
+function rangeLabel(start: Date, end: Date, timeFormat: '12h' | '24h' = '24h') {
+  const format = (date: Date) => {
+    const monthDay = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+    const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: timeFormat === '12h' }).format(date);
+    return `${monthDay}, ${time}`;
+  };
   return `${format(start)} – ${format(end)}`;
+}
+
+function TimeInput({
+  date,
+  disabled,
+  timeFormat,
+  onChange,
+}: {
+  date?: Date;
+  disabled?: boolean;
+  timeFormat: '12h' | '24h';
+  onChange: (value: string) => void;
+}) {
+  const hourRef = useRef<HTMLInputElement>(null);
+  const minuteRef = useRef<HTMLInputElement>(null);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const is12 = timeFormat === '12h';
+  const rawH = date ? date.getHours() : 0;
+  const rawM = date ? date.getMinutes() : 0;
+  const isPm = rawH >= 12;
+  const dispH = is12 ? (rawH % 12 === 0 ? 12 : rawH % 12) : rawH;
+
+  const [hourText, setHourText] = useState(() => (date ? pad(dispH) : ''));
+  const [minuteText, setMinuteText] = useState(() => (date ? pad(rawM) : ''));
+
+  useEffect(() => {
+    if (date) {
+      setHourText(pad(dispH));
+      setMinuteText(pad(rawM));
+    } else {
+      setHourText('');
+      setMinuteText('');
+    }
+  }, [date?.getTime(), timeFormat, dispH, rawM]);
+
+  const commit = (h: number, m: number, pm: boolean) => {
+    let finalH = h;
+    if (is12) {
+      if (pm && h < 12) finalH = h + 12;
+      if (!pm && h === 12) finalH = 0;
+    }
+    finalH = Math.max(0, Math.min(23, finalH));
+    const finalM = Math.max(0, Math.min(59, m));
+    onChange(`${pad(finalH)}:${pad(finalM)}`);
+  };
+
+  const handleHourInput = (event: Event) => {
+    const target = event.currentTarget as HTMLInputElement;
+    const clean = target.value.replace(/\D/g, '').slice(0, 2);
+    setHourText(clean);
+    const num = Number(clean);
+    if (clean.length > 0 && !isNaN(num)) {
+      const maxH = is12 ? 12 : 23;
+      if (num <= maxH && (is12 ? num >= 1 : num >= 0)) {
+        commit(num, Number(minuteText) || 0, isPm);
+      }
+    }
+    if (clean.length === 2 || (!is12 && Number(clean) > 2) || (is12 && Number(clean) > 1)) {
+      minuteRef.current?.focus();
+      minuteRef.current?.select();
+    }
+  };
+
+  const handleMinuteInput = (event: Event) => {
+    const target = event.currentTarget as HTMLInputElement;
+    const clean = target.value.replace(/\D/g, '').slice(0, 2);
+    setMinuteText(clean);
+    const num = Number(clean);
+    if (clean.length > 0 && !isNaN(num) && num <= 59) {
+      commit(Number(hourText) || (is12 ? 12 : 0), num, isPm);
+    }
+  };
+
+  const handleHourBlur = () => {
+    if (!date) return;
+    let num = Number(hourText);
+    if (isNaN(num) || hourText.trim() === '') num = dispH;
+    if (is12) {
+      if (num < 1) num = 1;
+      if (num > 12) num = 12;
+    } else {
+      if (num < 0) num = 0;
+      if (num > 23) num = 23;
+    }
+    setHourText(pad(num));
+    commit(num, Number(minuteText) || 0, isPm);
+  };
+
+  const handleMinuteBlur = () => {
+    if (!date) return;
+    let num = Number(minuteText);
+    if (isNaN(num) || minuteText.trim() === '') num = rawM;
+    if (num < 0) num = 0;
+    if (num > 59) num = 59;
+    setMinuteText(pad(num));
+    commit(Number(hourText) || (is12 ? 12 : 0), num, isPm);
+  };
+
+  const stepHour = (delta: number) => {
+    if (!date || disabled) return;
+    let cur = Number(hourText);
+    if (isNaN(cur)) cur = dispH;
+    let next: number;
+    if (is12) {
+      next = cur + delta;
+      if (next > 12) next = 1;
+      if (next < 1) next = 12;
+    } else {
+      next = (cur + delta + 24) % 24;
+    }
+    setHourText(pad(next));
+    commit(next, Number(minuteText) || 0, isPm);
+  };
+
+  const stepMinute = (delta: number) => {
+    if (!date || disabled) return;
+    let cur = Number(minuteText);
+    if (isNaN(cur)) cur = rawM;
+    const next = (cur + delta + 60) % 60;
+    setMinuteText(pad(next));
+    commit(Number(hourText) || (is12 ? 12 : 0), next, isPm);
+  };
+
+  const handleHourKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      stepHour(1);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      stepHour(-1);
+    } else if (e.key === ':' || e.key === 'ArrowRight' || e.key === 'Enter') {
+      e.preventDefault();
+      minuteRef.current?.focus();
+      minuteRef.current?.select();
+    }
+  };
+
+  const handleMinuteKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      stepMinute(e.shiftKey ? 5 : 1);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      stepMinute(e.shiftKey ? -5 : -1);
+    } else if (e.key === 'ArrowLeft' && minuteRef.current?.selectionStart === 0) {
+      e.preventDefault();
+      hourRef.current?.focus();
+      hourRef.current?.select();
+    } else if (e.key === 'Backspace' && minuteText === '') {
+      e.preventDefault();
+      hourRef.current?.focus();
+      hourRef.current?.select();
+    }
+  };
+
+  const toggleAmPm = () => {
+    if (!date || disabled) return;
+    commit(Number(hourText) || (is12 ? 12 : 0), Number(minuteText) || 0, !isPm);
+  };
+
+  return (
+    <div class={`time-input ${disabled ? 'disabled' : ''}`}>
+      <input
+        ref={hourRef}
+        type="text"
+        inputMode="numeric"
+        class="time-part"
+        value={hourText}
+        disabled={disabled}
+        aria-label="Hours"
+        maxLength={2}
+        onFocus={e => (e.currentTarget as HTMLInputElement).select()}
+        onInput={handleHourInput}
+        onBlur={handleHourBlur}
+        onKeyDown={handleHourKeyDown}
+        onWheel={e => {
+          e.preventDefault();
+          stepHour(e.deltaY < 0 ? 1 : -1);
+        }}
+      />
+      <span class="time-sep">:</span>
+      <input
+        ref={minuteRef}
+        type="text"
+        inputMode="numeric"
+        class="time-part"
+        value={minuteText}
+        disabled={disabled}
+        aria-label="Minutes"
+        maxLength={2}
+        onFocus={e => (e.currentTarget as HTMLInputElement).select()}
+        onInput={handleMinuteInput}
+        onBlur={handleMinuteBlur}
+        onKeyDown={handleMinuteKeyDown}
+        onWheel={e => {
+          e.preventDefault();
+          stepMinute(e.deltaY < 0 ? 1 : -1);
+        }}
+      />
+      {is12 && (
+        <button
+          type="button"
+          class="time-ampm"
+          disabled={disabled}
+          onClick={toggleAmPm}
+          aria-label="Toggle AM/PM"
+        >
+          {isPm ? 'PM' : 'AM'}
+        </button>
+      )}
+    </div>
+  );
 }
 function presetRange(preset: Preset, now: Date): Range {
   const end = new Date(now);
@@ -37,8 +252,8 @@ function presetRange(preset: Preset, now: Date): Range {
   return { start, end };
 }
 
-export function DateRangePicker({ fromTs, toTs, hours, retentionDays, onChange }: {
-  fromTs?: number; toTs?: number; hours: number; retentionDays: number;
+export function DateRangePicker({ fromTs, toTs, hours, retentionDays, timeFormat = '24h', onChange }: {
+  fromTs?: number; toTs?: number; hours: number; retentionDays: number; timeFormat?: '12h' | '24h';
   onChange: (from: number, to: number) => void;
 }) {
   const trigger = useRef<HTMLDivElement>(null);
@@ -144,14 +359,18 @@ export function DateRangePicker({ fromTs, toTs, hours, retentionDays, onChange }
   const earliestMonth = new Date(earliest.getFullYear(), earliest.getMonth(), 1);
   const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const valid = !!draftStart && !!draftEnd && draftEnd > draftStart && draftEnd <= now && draftStart >= earliest;
-  const earliestLabel = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(earliest);
+  const earliestLabel = new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    hour12: timeFormat === '12h',
+  }).format(earliest);
 
   return <>
     <div class="range-trigger" ref={trigger}>
       <button type="button" class="range-nav" aria-label="Previous range" disabled={from.getTime() - (to.getTime() - from.getTime()) < earliest.getTime()} onClick={() => shift(-1)}>‹</button>
-      <button type="button" class="range-main" aria-label={`Date range: ${rangeLabel(from, to)}`} aria-expanded={open} onClick={() => open ? setOpen(false) : show()}>
+      <button type="button" class="range-main" aria-label={`Date range: ${rangeLabel(from, to, timeFormat)}`} aria-expanded={open} onClick={() => open ? setOpen(false) : show()}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4m10-4v4M3 10h18" /></svg>
-        <span>{rangeLabel(from, to)}</span>
+        <span>{rangeLabel(from, to, timeFormat)}</span>
       </button>
       <button type="button" class="range-nav" aria-label="Next range" disabled={to.getTime() + (to.getTime() - from.getTime()) > now.getTime()} onClick={() => shift(1)}>›</button>
     </div>
@@ -182,8 +401,12 @@ export function DateRangePicker({ fromTs, toTs, hours, retentionDays, onChange }
             })}
           </div>
           <div class="range-times">
-            <label>Time from<input type="time" value={timeValue(draftStart)} disabled={!draftStart} onInput={event => changeTime('start', event.currentTarget.value)} /></label>
-            <label>Time to<input type="time" value={timeValue(draftEnd)} disabled={!draftEnd} onInput={event => changeTime('end', event.currentTarget.value)} /></label>
+            <label>Time from
+              <TimeInput date={draftStart} disabled={!draftStart} timeFormat={timeFormat} onChange={val => changeTime('start', val)} />
+            </label>
+            <label>Time to
+              <TimeInput date={draftEnd} disabled={!draftEnd} timeFormat={timeFormat} onChange={val => changeTime('end', val)} />
+            </label>
           </div>
         </div>
       </div>

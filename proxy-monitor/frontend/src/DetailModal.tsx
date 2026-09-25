@@ -11,6 +11,33 @@ function Info({ label, value, className = '', blockClass = '' }: { label: string
   return <div class={`detail-info-block ${blockClass}`}><span class="dib-label">{label}</span><span class={`dib-value ${className}`}>{value}</span></div>;
 }
 
+const DISPLAY_FORMATS: Record<'12h' | '24h', Record<string, string>> = {
+  '12h': {
+    datetime: 'MMM d, yyyy, h:mm:ss a',
+    millisecond: 'h:mm:ss.SSS a',
+    second: 'h:mm:ss a',
+    minute: 'h:mm a',
+    hour: 'ha',
+    day: 'MMM d',
+    week: 'PP',
+    month: 'MMM yyyy',
+    quarter: 'qqq - yyyy',
+    year: 'yyyy',
+  },
+  '24h': {
+    datetime: 'MMM d, yyyy, HH:mm:ss',
+    millisecond: 'HH:mm:ss.SSS',
+    second: 'HH:mm:ss',
+    minute: 'HH:mm',
+    hour: 'HH:mm',
+    day: 'MMM d',
+    week: 'PP',
+    month: 'MMM yyyy',
+    quarter: 'qqq - yyyy',
+    year: 'yyyy',
+  },
+};
+
 function LatencyChart({ series, groupBy, timeFormat, theme, onHour }: {
   series: ChartPoint[]; groupBy: GroupBy; timeFormat: '12h' | '24h'; theme: string; onHour: (ts: number) => void;
 }) {
@@ -38,7 +65,11 @@ function LatencyChart({ series, groupBy, timeFormat, theme, onHour }: {
         scales: {
           x: { type: 'time', stacked: true, offset: true, grid: { color: color('--border') },
             ticks: { color: color('--text2'), maxTicksLimit: 10 },
-            time: { unit: groupBy, tooltipFormat: timeFormat === '12h' ? 'dd MMM hh:mm a' : 'dd MMM HH:mm' } },
+            time: {
+              unit: groupBy,
+              displayFormats: DISPLAY_FORMATS[timeFormat],
+              tooltipFormat: timeFormat === '12h' ? 'dd MMM hh:mm a' : 'dd MMM HH:mm',
+            } },
           y: { stacked: true, beginAtZero: true, grid: { color: color('--border') }, ticks: { color: color('--text2'), precision: 0 },
             title: { display: true, text: 'Checks', color: color('--text2') } },
           y2: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { color: color('--chart') },
@@ -111,7 +142,7 @@ export function DetailModal({ proxy, meta, now, token, theme, onClose, onError }
   }, []);
   return <Modal title={proxy.name} privateTitle onClose={onClose} size="large">
     <div class={`detail-info-grid ${otherEnabled ? '' : 'single-protocol'}`}>
-      <Info label={`${type.toUpperCase()} status${proxy.checking ? ' · Checking…' : ''}`} value={checkStatus} className={checkStatusClass} />
+      <Info label={`${type.toUpperCase()} status`} value={checkStatus} className={checkStatusClass} />
       <Info label="Last check" value={checkDateTime(last?.timestamp, meta.time_format)} />
       <Info label="Address" value={`${proxy.host}:${proxy.port}`} className="privacy mono" />
       <Info label="External IP" value={proxy.external_ip ?? '—'} className="privacy" />
@@ -133,7 +164,7 @@ export function DetailModal({ proxy, meta, now, token, theme, onClose, onError }
       <div class="chart-control-group"><div class="segmented" role="group" aria-label="Grouping">
         {(['minute', 'hour', 'day'] as const).map(value => <button key={value} class={groupBy === value ? 'active' : ''} onClick={() => setGroupBy(value)}>{value}</button>)}
       </div></div>
-      <div class="chart-control-group"><DateRangePicker fromTs={fromTs} toTs={toTs} hours={hours} retentionDays={meta.retention_days} onChange={(from, to) => setRange(from, to)} /></div>
+      <div class="chart-control-group"><DateRangePicker fromTs={fromTs} toTs={toTs} hours={hours} retentionDays={meta.retention_days} timeFormat={meta.time_format} onChange={(from, to) => setRange(from, to)} /></div>
     </div>
     <div class="chart-container">
       {loading && <div class="chart-loading"><div class="spinner" /></div>}
