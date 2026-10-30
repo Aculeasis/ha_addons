@@ -2,7 +2,7 @@ ARG BUILD_FROM
 FROM $BUILD_FROM
 LABEL org.opencontainers.image.source=https://github.com/Aculeasis/ha_addons
 
-ARG XRAY_VERSION="26.10.21"
+ARG XRAY_VERSION="26.10.29"
 
 RUN apk add --no-cache bash curl unzip
 

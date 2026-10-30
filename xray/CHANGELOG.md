@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+
+- Update Xray-core from v26.10.21 to v26.10.29
+
 ## 1.1.0
 
 - Update Xray-core from v26.3.27 to v26.10.21
