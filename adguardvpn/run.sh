@@ -35,7 +35,11 @@ check_logged_in() {
 ensure_installed() {
     if [ ! -f "$CLI_PATH" ]; then
         bashio::log.info "AdGuard VPN CLI not found. Installing..."
-        /app/install.sh
+        if ! /app/install.sh; then
+            bashio::log.error "Installation failed."
+            bashio::log.info "Waiting indefinitely..."
+            exec sleep infinity
+        fi
     else
         chmod +x "$CLI_PATH" 2>/dev/null || true
         bashio::log.info "AdGuard VPN CLI found: $CLI_PATH"
@@ -122,9 +126,11 @@ handle_reinstall() {
     rm -f "$CLI_PATH" 2>/dev/null || true
 
     # Run installation
-    /app/install.sh
-
-    bashio::log.notice "Reinstallation complete. Set mode to 'normal' and restart."
+    if /app/install.sh; then
+        bashio::log.notice "Reinstallation complete. Set mode to 'normal' and restart."
+    else
+        bashio::log.error "Reinstallation failed. Check the logs above."
+    fi
 }
 
 handle_login() {
@@ -135,7 +141,7 @@ handle_login() {
 
     # Check if already logged in
     if check_logged_in; then
-        bashio::log.info "Already logged in. Logging out first..."
+        bashio::log.notice "Already logged in. Set mode to 'normal' and restart."
         return 0
     fi
 
@@ -152,6 +158,7 @@ handle_login() {
             echo "$license_info" | while IFS= read -r lline; do
                 [ -n "$lline" ] && bashio::log.notice "$lline"
             done
+            bashio::log.notice "Set mode to 'normal' and restart."
             return 0
         else
             bashio::log.error "Username/password login failed. Output: $login_output"
@@ -195,6 +202,7 @@ handle_login() {
                     [ -n "$lline" ] && bashio::log.notice "$lline"
                 done
                 rm -f "$login_fifo"
+                bashio::log.notice "Set mode to 'normal' and restart."
                 return 0
             fi
         fi
@@ -221,6 +229,7 @@ handle_locations() {
     echo "$locations_output" | while IFS= read -r line; do
         [ -n "$line" ] && bashio::log.notice "$line"
     done
+    bashio::log.notice "Locations listed. Select a location, set mode to 'normal' and restart."
 }
 
 handle_normal() {
@@ -290,7 +299,7 @@ main() {
             handle_reinstall
             ;;
         login)
-            handle_login
+            handle_login || true
             ;;
         logout)
             handle_logout
@@ -304,9 +313,11 @@ main() {
         *)
             bashio::log.error "Unknown mode: $mode"
             bashio::log.info "Valid modes: normal, login, logout, locations, reinstall"
-            exit 1
             ;;
     esac
+
+    bashio::log.info "Waiting indefinitely..."
+    exec sleep infinity
 }
 
 # Run main
